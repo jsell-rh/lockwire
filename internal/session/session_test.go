@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"errors"
 	"sort"
 	"sync"
 	"testing"
@@ -593,20 +594,17 @@ func TestRevokeZerosOldStreamKey(t *testing.T) {
 	s.RegisterViewer(fakeAuthKey(t, 0x10), "cli")
 	info, _, _ := s.RegisterViewer(fakeAuthKey(t, 0x20), "cli")
 
-	// Capture the old stream key bytes
+	// Capture the old stream key slice header (not a copy)
 	s.mu.RLock()
-	oldKey := make([]byte, len(s.streamKey))
-	copy(oldKey, s.streamKey)
+	oldKeySlice := s.streamKey
 	s.mu.RUnlock()
 
 	s.RevokeViewer(info.ID)
 
-	// The old key content should be zeroed (the session now holds K')
-	// We verify the session ID changed, confirming a new key is in use
-	newSID := s.SessionID()
-	oldSID := crypto.DeriveSessionID(oldKey)
-	if newSID == oldSID {
-		t.Error("session ID did not change after revocation — old key still in use")
+	for _, b := range oldKeySlice {
+		if b != 0 {
+			t.Fatal("old stream key not zeroed after revocation")
+		}
 	}
 }
 
@@ -783,4 +781,202 @@ func TestDoubleCloseIsSafe(t *testing.T) {
 	}
 	s.Close()
 	s.Close() // should not panic
+}
+
+// --- Additional edge cases ---
+
+func TestRevokeViewerOnClosedSession(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _, _ := s.RegisterViewer(fakeAuthKey(t, 0x10), "cli")
+	s.Close()
+
+	_, err = s.RevokeViewer(info.ID)
+	if err == nil {
+		t.Error("expected error revoking on closed session")
+	}
+}
+
+func TestRemoveUnknownViewer(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	s.RemoveViewer("zzzzzz") // should not panic
+}
+
+func TestRemoveViewerZerosAuthKey(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	info, _, _ := s.RegisterViewer(fakeAuthKey(t, 0x10), "cli")
+
+	s.mu.RLock()
+	authKeySlice := s.viewers[info.ID].authKey
+	s.mu.RUnlock()
+
+	s.RemoveViewer(info.ID)
+
+	for _, b := range authKeySlice {
+		if b != 0 {
+			t.Fatal("removed viewer's auth key not zeroed")
+		}
+	}
+}
+
+// --- Error sentinel assertions ---
+
+func TestRevokeViewerNotFoundSentinel(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.RevokeViewer("zzzzzz")
+	if !errors.Is(err, ErrViewerNotFound) {
+		t.Errorf("expected ErrViewerNotFound, got %v", err)
+	}
+}
+
+func TestRegisterViewerOnClosedSessionSentinel(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	_, _, err = s.RegisterViewer(fakeAuthKey(t, 0x40), "cli")
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Errorf("expected ErrSessionClosed, got %v", err)
+	}
+}
+
+func TestEncryptFrameOnClosedSessionSentinel(t *testing.T) {
+	s, err := NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	_, _, _, err = s.EncryptFrame([]byte("data"))
+	if !errors.Is(err, ErrSessionClosed) {
+		t.Errorf("expected ErrSessionClosed, got %v", err)
+	}
+}
+
+// --- Spec scenario: revoked viewer cannot decrypt new frames ---
+
+func TestRevokedViewerCannotDecryptNewFrames(t *testing.T) {
+	now := time.Unix(300, 0)
+	s, err := NewSession(WithClock(fixedClock(now)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	authKeyA := fakeAuthKey(t, 0x10)
+	authKeyB := fakeAuthKey(t, 0x20)
+
+	infoA, payloadA, _ := s.RegisterViewer(authKeyA, "cli")
+	s.RegisterViewer(authKeyB, "cli")
+
+	// Viewer A extracts K and derives the current epoch key
+	oldK, _ := crypto.Open(authKeyA, payloadA.Nonce, payloadA.Ciphertext)
+	defer crypto.ZeroBytes(oldK)
+
+	// Revoke Viewer A
+	s.RevokeViewer(infoA.ID)
+
+	// Encrypt a frame under K' (the new stream key)
+	ct, nonce, epoch, err := s.EncryptFrame([]byte("secret-after-revoke"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Viewer A tries to decrypt using epoch key derived from old K
+	oldEpochKey, _ := crypto.DeriveEpochKey(oldK, epoch)
+	defer crypto.ZeroBytes(oldEpochKey)
+
+	_, err = crypto.Open(oldEpochKey, nonce, ct)
+	if err == nil {
+		t.Error("revoked viewer should not be able to decrypt frames under K'")
+	}
+}
+
+// --- Spec scenario: epoch boundary transparent to active viewers ---
+
+func TestEpochBoundaryTransparent(t *testing.T) {
+	epoch5 := time.Unix(300, 0) // epoch 5
+	epoch6 := time.Unix(360, 0) // epoch 6
+	currentTime := epoch5
+
+	s, err := NewSession(WithClock(func() time.Time { return currentTime }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	// Register a viewer and extract K
+	authKey := fakeAuthKey(t, 0x10)
+	_, payload, _ := s.RegisterViewer(authKey, "cli")
+	k, _ := crypto.Open(authKey, payload.Nonce, payload.Ciphertext)
+	defer crypto.ZeroBytes(k)
+
+	// Encrypt at epoch 5
+	ct5, nonce5, ep5, err := s.EncryptFrame([]byte("epoch-5-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep5 != 5 {
+		t.Fatalf("expected epoch 5, got %d", ep5)
+	}
+
+	// Advance clock to epoch 6
+	currentTime = epoch6
+
+	// Encrypt at epoch 6
+	ct6, nonce6, ep6, err := s.EncryptFrame([]byte("epoch-6-data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep6 != 6 {
+		t.Fatalf("expected epoch 6, got %d", ep6)
+	}
+
+	// Viewer independently derives both epoch keys from K
+	ek5, _ := crypto.DeriveEpochKey(k, 5)
+	defer crypto.ZeroBytes(ek5)
+	ek6, _ := crypto.DeriveEpochKey(k, 6)
+	defer crypto.ZeroBytes(ek6)
+
+	// Both frames decrypt correctly
+	pt5, err := crypto.Open(ek5, nonce5, ct5)
+	if err != nil {
+		t.Fatalf("decrypting epoch-5 frame: %v", err)
+	}
+	if string(pt5) != "epoch-5-data" {
+		t.Errorf("epoch-5 plaintext = %q, want %q", pt5, "epoch-5-data")
+	}
+
+	pt6, err := crypto.Open(ek6, nonce6, ct6)
+	if err != nil {
+		t.Fatalf("decrypting epoch-6 frame: %v", err)
+	}
+	if string(pt6) != "epoch-6-data" {
+		t.Errorf("epoch-6 plaintext = %q, want %q", pt6, "epoch-6-data")
+	}
+
+	// Cross-epoch decryption fails
+	_, err = crypto.Open(ek5, nonce6, ct6)
+	if err == nil {
+		t.Error("epoch-5 key should not decrypt epoch-6 frame")
+	}
 }
