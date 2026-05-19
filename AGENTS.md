@@ -106,9 +106,16 @@ These must never be violated — no exceptions, no shortcuts:
 - **Forward secrecy scope.** Lockwire provides inter-session FS (fresh K per session). Within a session, K is the master secret: all epoch keys are derivable from K. This is intentional (simpler architecture, Viewers derive epoch keys independently). Do not implement a ratchet without a spec change.
 - **K_auth_i lifetime.** The per-viewer SPAKE2 session key for each Viewer must survive in memory for the full session — it is needed to deliver K' during revocation. Do not discard it after the initial key handshake.
 
+## Observability
+
+- **Domain-Oriented Observability (DOO) only.** No raw `log.*` or `slog.*` calls in production code. All observable events go through domain probes — thin interfaces that describe what happened in domain terms, not infrastructure terms.
+- Each package defines its own probe interface (e.g. `SessionProbe`, `RelayProbe`). Probes emit domain events: `ViewerJoined`, `EpochRotated`, `SessionTerminated` — not `"writing bytes to socket"`.
+- Production wiring provides a probe implementation that maps domain events to structured logs, metrics, or traces. Tests provide a recording probe (a fake) to assert on domain events without coupling to log output.
+- **No logging in domain logic.** If you feel the urge to add a log line, define a probe method instead. The probe boundary is where domain meets infrastructure.
+
 ## Testing
 
-- **Fakes, not mocks.** Test doubles must be behavioral fakes. No `gomock`, no `testify/mock`.
+- **Fakes, not mocks.** Test doubles must be behavioral fakes. No `gomock`, no `testify/mock`. This includes observability — use recording probes (fakes), never mock loggers.
 - Tests verify behavior, not implementation details.
 - If the tests pass but `lw share` crashes, the tests did not do their job.
 - Crypto tests must use known-answer vectors where they exist (NIST test vectors for AES-GCM, RFC vectors for HKDF).
