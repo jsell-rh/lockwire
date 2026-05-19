@@ -350,6 +350,33 @@ func TestViewerDisconnectDoesNotAffectOthers(t *testing.T) {
 	}
 }
 
+func TestTermSizeBroadcast(t *testing.T) {
+	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
+
+	sharer := dialShare(t, ts, sid)
+	_ = readMsg(t, sharer)
+
+	viewerA := dialWatch(t, ts, sid)
+	_ = readMsg(t, viewerA)
+
+	viewerB := dialWatch(t, ts, sid)
+	_ = readMsg(t, viewerB)
+
+	payload := []byte{protocol.MsgTypeTermSize, 0x00, 0x78, 0x00, 0x18}
+	writeMsg(t, sharer, payload)
+
+	gotA := readMsg(t, viewerA)
+	gotB := readMsg(t, viewerB)
+
+	if string(gotA) != string(payload) {
+		t.Errorf("viewer A got %x, want %x", gotA, payload)
+	}
+	if string(gotB) != string(payload) {
+		t.Errorf("viewer B got %x, want %x", gotB, payload)
+	}
+}
+
 func TestInvalidSessionIDRejected(t *testing.T) {
 	_, ts := startTestServer(t)
 

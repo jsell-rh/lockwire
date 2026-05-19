@@ -32,6 +32,7 @@ const (
 	MsgTypeHeartbeat byte = 0x04 // Either → Relay (ping)
 	MsgTypePong      byte = 0x05 // Relay → either (pong)
 	MsgTypeControl   byte = 0x06 // Relay → Viewer (session control)
+	MsgTypeTermSize  byte = 0x07 // Sharer → Relay → all Viewers (broadcast)
 
 	// Control frame sub-types (payload byte after MsgTypeControl).
 	CtrlRegistrationAck  byte = 0x01

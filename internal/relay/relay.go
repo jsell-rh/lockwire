@@ -191,7 +191,7 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 		}
 
 		switch data[0] {
-		case protocol.MsgTypeStream:
+		case protocol.MsgTypeStream, protocol.MsgTypeTermSize:
 			sess.mu.Lock()
 			for id, vc := range sess.viewers {
 				select {
