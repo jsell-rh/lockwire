@@ -101,16 +101,39 @@ func TestSPAKE2DifferentSessionsProduceDifferentKeys(t *testing.T) {
 
 func TestSPAKE2SharerCleanup(t *testing.T) {
 	code := []byte("cleanup test")
-	sharer, _ := NewSPAKE2Sharer(code)
+	sharer, err := NewSPAKE2Sharer(code)
+	if err != nil {
+		t.Fatalf("NewSPAKE2Sharer: %v", err)
+	}
 
-	msg1, _ := sharer.Start()
-	viewer, _ := NewSPAKE2Viewer(code)
-	msg2, _ := viewer.Exchange(msg1)
-	confirm1, _ := sharer.Finish(msg2)
-	confirm2, _ := viewer.Confirm(confirm1)
-	_ = sharer.Verify(confirm2)
+	msg1, err := sharer.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	viewer, err := NewSPAKE2Viewer(code)
+	if err != nil {
+		t.Fatalf("NewSPAKE2Viewer: %v", err)
+	}
+	msg2, err := viewer.Exchange(msg1)
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	confirm1, err := sharer.Finish(msg2)
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	confirm2, err := viewer.Confirm(confirm1)
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if err := sharer.Verify(confirm2); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
 
-	key, _ := sharer.SessionKey()
+	key, err := sharer.SessionKey()
+	if err != nil {
+		t.Fatalf("SessionKey: %v", err)
+	}
 	keyCopy := make([]byte, len(key))
 	copy(keyCopy, key)
 
@@ -131,16 +154,39 @@ func TestSPAKE2SharerCleanup(t *testing.T) {
 
 func completeSPAKE2(t *testing.T, code []byte) []byte {
 	t.Helper()
-	sharer, _ := NewSPAKE2Sharer(code)
-	viewer, _ := NewSPAKE2Viewer(code)
+	sharer, err := NewSPAKE2Sharer(code)
+	if err != nil {
+		t.Fatalf("NewSPAKE2Sharer: %v", err)
+	}
+	viewer, err := NewSPAKE2Viewer(code)
+	if err != nil {
+		t.Fatalf("NewSPAKE2Viewer: %v", err)
+	}
 
-	msg1, _ := sharer.Start()
-	msg2, _ := viewer.Exchange(msg1)
-	confirm1, _ := sharer.Finish(msg2)
-	confirm2, _ := viewer.Confirm(confirm1)
-	_ = sharer.Verify(confirm2)
+	msg1, err := sharer.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	msg2, err := viewer.Exchange(msg1)
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	confirm1, err := sharer.Finish(msg2)
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	confirm2, err := viewer.Confirm(confirm1)
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if err := sharer.Verify(confirm2); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
 
-	key, _ := sharer.SessionKey()
+	key, err := sharer.SessionKey()
+	if err != nil {
+		t.Fatalf("SessionKey: %v", err)
+	}
 	out := make([]byte, len(key))
 	copy(out, key)
 	return out

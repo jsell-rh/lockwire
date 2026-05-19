@@ -339,7 +339,10 @@ func TestNonceCounterConcurrentSafety(t *testing.T) {
 
 func TestGenerateViewerIDFormat(t *testing.T) {
 	for i := 0; i < 50; i++ {
-		id := GenerateViewerID()
+		id, err := GenerateViewerID()
+		if err != nil {
+			t.Fatalf("GenerateViewerID: %v", err)
+		}
 		if len(id) != protocol.ViewerIDLen {
 			t.Errorf("viewer ID length = %d, want %d", len(id), protocol.ViewerIDLen)
 		}
@@ -352,7 +355,10 @@ func TestGenerateViewerIDFormat(t *testing.T) {
 func TestGenerateViewerIDUniqueness(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		id := GenerateViewerID()
+		id, err := GenerateViewerID()
+		if err != nil {
+			t.Fatalf("GenerateViewerID: %v", err)
+		}
 		if seen[id] {
 			t.Errorf("duplicate viewer ID: %s", id)
 		}

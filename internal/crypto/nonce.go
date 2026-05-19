@@ -18,7 +18,7 @@ func NewNonceCounter() *NonceCounter {
 func (nc *NonceCounter) Next() []byte {
 	v := nc.val.Add(1)
 	nonce := make([]byte, protocol.NonceLen)
-	binary.BigEndian.PutUint64(nonce[4:], v)
+	binary.BigEndian.PutUint64(nonce[protocol.NonceLen-8:], v)
 	return nonce
 }
 
