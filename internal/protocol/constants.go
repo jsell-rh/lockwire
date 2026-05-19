@@ -3,6 +3,7 @@ package protocol
 const (
 	SessionIDHMACKey    = "lw-session-id"
 	EpochKeyInfoPrefix  = "lw-epoch-"
+	AuthKeyInfo         = "lw-auth-key"
 	SPAKE2AssociatedData = "lockwire-v1"
 
 	KeyLen       = 32
