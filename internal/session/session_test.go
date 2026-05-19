@@ -12,6 +12,8 @@ import (
 	"github.com/jsell-rh/lockwire/internal/protocol"
 )
 
+var testCode = []byte("thunder-eagle-river-moon-stone-fire")
+
 func fixedClock(t time.Time) func() time.Time {
 	return func() time.Time { return t }
 }
@@ -28,7 +30,7 @@ func fakeAuthKey(t *testing.T, seed byte) []byte {
 // --- Session Creation ---
 
 func TestNewSession(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,26 +42,47 @@ func TestNewSession(t *testing.T) {
 	}
 }
 
-func TestNewSessionUniqueness(t *testing.T) {
-	s1, err := NewSession()
+func TestNewSessionDifferentCodesProduceDifferentIDs(t *testing.T) {
+	code1 := []byte("thunder-eagle-river-moon-stone-fire")
+	code2 := []byte("abandon-abandon-abandon-abandon-abandon-abandon")
+
+	s1, err := NewSession(code1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s1.Close()
 
-	s2, err := NewSession()
+	s2, err := NewSession(code2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s2.Close()
 
 	if s1.SessionID() == s2.SessionID() {
-		t.Error("two sessions have the same session ID")
+		t.Error("different codes produced the same session ID")
+	}
+}
+
+func TestNewSessionSameCodeProducesSameID(t *testing.T) {
+	s1, err := NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s1.Close()
+
+	s2, err := NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	if s1.SessionID() != s2.SessionID() {
+		t.Error("same code produced different session IDs")
 	}
 }
 
 func TestSessionIDDeterministic(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +98,7 @@ func TestSessionIDDeterministic(t *testing.T) {
 // --- Viewer Registration ---
 
 func TestRegisterViewer(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +127,9 @@ func TestRegisterViewer(t *testing.T) {
 	}
 }
 
-func TestRegisterViewerDecryptsToStreamKey(t *testing.T) {
-	s, err := NewSession()
+func TestRegisterViewerDecryptsToValidStreamKey(t *testing.T) {
+	now := time.Unix(300, 0)
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,14 +147,32 @@ func TestRegisterViewerDecryptsToStreamKey(t *testing.T) {
 	}
 	defer crypto.ZeroBytes(k)
 
-	derivedSID := crypto.DeriveSessionID(k)
-	if derivedSID != s.SessionID() {
-		t.Error("decrypted key does not derive to the session's session ID")
+	if len(k) != protocol.KeyLen {
+		t.Fatalf("stream key length = %d, want %d", len(k), protocol.KeyLen)
+	}
+
+	ct, nonce, epoch, err := s.EncryptFrame([]byte("verify-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	epochKey, err := crypto.DeriveEpochKey(k, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+
+	pt, err := crypto.Open(epochKey, nonce, ct)
+	if err != nil {
+		t.Fatalf("decrypting frame with delivered stream key: %v", err)
+	}
+	if string(pt) != "verify-key" {
+		t.Errorf("decrypted = %q, want %q", pt, "verify-key")
 	}
 }
 
 func TestRegisterMultipleViewers(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +193,7 @@ func TestRegisterMultipleViewers(t *testing.T) {
 }
 
 func TestRegisterViewerBrowserType(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +210,7 @@ func TestRegisterViewerBrowserType(t *testing.T) {
 }
 
 func TestRegisterViewerOnClosedSession(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +226,7 @@ func TestRegisterViewerOnClosedSession(t *testing.T) {
 // --- Viewer Listing ---
 
 func TestListViewersEmpty(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +239,7 @@ func TestListViewersEmpty(t *testing.T) {
 }
 
 func TestListViewers(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +264,7 @@ func TestListViewers(t *testing.T) {
 }
 
 func TestListViewersExcludesKeyMaterial(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +286,7 @@ func TestListViewersExcludesKeyMaterial(t *testing.T) {
 // --- Viewer Revocation ---
 
 func TestRevokeViewer(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +315,8 @@ func TestRevokeViewer(t *testing.T) {
 }
 
 func TestRevokeViewerNewKeyDecryptable(t *testing.T) {
-	s, err := NewSession()
+	now := time.Unix(300, 0)
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,20 +343,37 @@ func TestRevokeViewerNewKeyDecryptable(t *testing.T) {
 	}
 	defer crypto.ZeroBytes(kPrime)
 
-	// K' derives a different session ID than old K
-	newSID := crypto.DeriveSessionID(kPrime)
-	if newSID == oldSID {
-		t.Error("K' derives to the same session ID as old K")
+	if len(kPrime) != protocol.KeyLen {
+		t.Fatalf("K' length = %d, want %d", len(kPrime), protocol.KeyLen)
 	}
 
-	// The session's session ID should now match K'
-	if newSID != s.SessionID() {
-		t.Error("session ID does not match K'")
+	// Session ID is stable across key rotation (derived from code, not K)
+	if s.SessionID() != oldSID {
+		t.Error("session ID changed on revocation — should be stable (derived from code)")
+	}
+
+	// K' can decrypt new frames
+	ct, nonce, epoch, err := s.EncryptFrame([]byte("post-revoke"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ek, err := crypto.DeriveEpochKey(kPrime, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(ek)
+
+	pt, err := crypto.Open(ek, nonce, ct)
+	if err != nil {
+		t.Fatalf("K' cannot decrypt post-revocation frame: %v", err)
+	}
+	if string(pt) != "post-revoke" {
+		t.Errorf("decrypted = %q, want %q", pt, "post-revoke")
 	}
 }
 
 func TestRevokeViewerRemovesFromList(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +396,7 @@ func TestRevokeViewerRemovesFromList(t *testing.T) {
 }
 
 func TestRevokeViewerNotFound(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +409,7 @@ func TestRevokeViewerNotFound(t *testing.T) {
 }
 
 func TestRevokeLastViewer(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +436,7 @@ func TestRevokeLastViewer(t *testing.T) {
 // --- Viewer Removal (disconnect, not revocation) ---
 
 func TestRemoveViewer(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +455,7 @@ func TestRemoveViewer(t *testing.T) {
 
 	// No key rotation on disconnect — session ID unchanged
 	if s.SessionID() != oldSID {
-		t.Error("session ID changed on viewer removal (should only change on revocation)")
+		t.Error("session ID changed on viewer removal — should be stable (derived from code)")
 	}
 }
 
@@ -403,7 +463,7 @@ func TestRemoveViewer(t *testing.T) {
 
 func TestCurrentEpoch(t *testing.T) {
 	now := time.Unix(120, 0) // epoch = 120/60 = 2
-	s, err := NewSession(WithClock(fixedClock(now)))
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +476,7 @@ func TestCurrentEpoch(t *testing.T) {
 
 func TestEpochKeyDerivedFromStreamKey(t *testing.T) {
 	now := time.Unix(300, 0) // epoch = 5
-	s, err := NewSession(WithClock(fixedClock(now)))
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +516,7 @@ func TestEpochKeyDerivedFromStreamKey(t *testing.T) {
 // --- Frame Encryption ---
 
 func TestEncryptFrame(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +535,7 @@ func TestEncryptFrame(t *testing.T) {
 }
 
 func TestEncryptFrameNonceMonotonic(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +555,7 @@ func TestEncryptFrameNonceMonotonic(t *testing.T) {
 }
 
 func TestEncryptFrameNonceContinuesAfterRevocation(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +585,7 @@ func TestEncryptFrameNonceContinuesAfterRevocation(t *testing.T) {
 }
 
 func TestEncryptFrameOnClosedSession(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -540,7 +600,7 @@ func TestEncryptFrameOnClosedSession(t *testing.T) {
 // --- Memory Security ---
 
 func TestCloseZerosStreamKey(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +617,7 @@ func TestCloseZerosStreamKey(t *testing.T) {
 }
 
 func TestCloseZerosViewerAuthKeys(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +645,7 @@ func TestCloseZerosViewerAuthKeys(t *testing.T) {
 }
 
 func TestRevokeZerosOldStreamKey(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +669,7 @@ func TestRevokeZerosOldStreamKey(t *testing.T) {
 }
 
 func TestRevokeZerosRevokedViewerAuthKey(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +695,7 @@ func TestRevokeZerosRevokedViewerAuthKey(t *testing.T) {
 // --- Concurrent Operations ---
 
 func TestConcurrentViewerRegistration(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,7 +736,7 @@ func TestConcurrentViewerRegistration(t *testing.T) {
 }
 
 func TestConcurrentEncryptFrame(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -714,7 +774,8 @@ func TestConcurrentEncryptFrame(t *testing.T) {
 // --- Revoked Viewer Rejoin ---
 
 func TestRevokedViewerRejoin(t *testing.T) {
-	s, err := NewSession()
+	now := time.Unix(300, 0)
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +789,6 @@ func TestRevokedViewerRejoin(t *testing.T) {
 
 	s.RevokeViewer(infoA.ID)
 
-	// Viewer A rejoins with a new auth key (fresh SPAKE2 handshake)
 	newAuthKey := fakeAuthKey(t, 0x30)
 	newInfo, payload, err := s.RegisterViewer(newAuthKey, "cli")
 	if err != nil {
@@ -739,20 +799,34 @@ func TestRevokedViewerRejoin(t *testing.T) {
 		t.Error("rejoin produced the same viewer ID as the revoked viewer")
 	}
 
-	// The new viewer should receive K' (the current stream key)
 	kPrime, err := crypto.Open(newAuthKey, payload.Nonce, payload.Ciphertext)
 	if err != nil {
 		t.Fatalf("decrypting K' for rejoined viewer: %v", err)
 	}
 	defer crypto.ZeroBytes(kPrime)
 
-	if crypto.DeriveSessionID(kPrime) != s.SessionID() {
-		t.Error("rejoined viewer received wrong stream key")
+	// Verify the rejoined viewer can decrypt new frames
+	ct, nonce, epoch, err := s.EncryptFrame([]byte("after-rejoin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ek, err := crypto.DeriveEpochKey(kPrime, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(ek)
+
+	pt, err := crypto.Open(ek, nonce, ct)
+	if err != nil {
+		t.Fatalf("rejoined viewer cannot decrypt frame: %v", err)
+	}
+	if string(pt) != "after-rejoin" {
+		t.Errorf("decrypted = %q, want %q", pt, "after-rejoin")
 	}
 }
 
 func TestWasRevoked(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +849,7 @@ func TestWasRevoked(t *testing.T) {
 // --- Double Close ---
 
 func TestDoubleCloseIsSafe(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +860,7 @@ func TestDoubleCloseIsSafe(t *testing.T) {
 // --- Additional edge cases ---
 
 func TestRevokeViewerOnClosedSession(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +874,7 @@ func TestRevokeViewerOnClosedSession(t *testing.T) {
 }
 
 func TestRemoveUnknownViewer(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +884,7 @@ func TestRemoveUnknownViewer(t *testing.T) {
 }
 
 func TestRemoveViewerZerosAuthKey(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -834,7 +908,7 @@ func TestRemoveViewerZerosAuthKey(t *testing.T) {
 // --- Error sentinel assertions ---
 
 func TestRevokeViewerNotFoundSentinel(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -847,7 +921,7 @@ func TestRevokeViewerNotFoundSentinel(t *testing.T) {
 }
 
 func TestRegisterViewerOnClosedSessionSentinel(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +934,7 @@ func TestRegisterViewerOnClosedSessionSentinel(t *testing.T) {
 }
 
 func TestEncryptFrameOnClosedSessionSentinel(t *testing.T) {
-	s, err := NewSession()
+	s, err := NewSession(testCode)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -876,7 +950,7 @@ func TestEncryptFrameOnClosedSessionSentinel(t *testing.T) {
 
 func TestRevokedViewerCannotDecryptNewFrames(t *testing.T) {
 	now := time.Unix(300, 0)
-	s, err := NewSession(WithClock(fixedClock(now)))
+	s, err := NewSession(testCode, WithClock(fixedClock(now)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +992,7 @@ func TestEpochBoundaryTransparent(t *testing.T) {
 	epoch6 := time.Unix(360, 0) // epoch 6
 	currentTime := epoch5
 
-	s, err := NewSession(WithClock(func() time.Time { return currentTime }))
+	s, err := NewSession(testCode, WithClock(func() time.Time { return currentTime }))
 	if err != nil {
 		t.Fatal(err)
 	}

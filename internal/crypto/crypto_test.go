@@ -2,7 +2,6 @@ package crypto
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -11,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jsell-rh/lockwire/internal/protocol"
+	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -40,47 +40,46 @@ func TestGenerateStreamKeyUniqueness(t *testing.T) {
 // --- Session ID ---
 
 func TestDeriveSessionIDKnownAnswer(t *testing.T) {
-	k := make([]byte, 32)
-	for i := range k {
-		k[i] = byte(i)
-	}
-	mac := hmac.New(sha256.New, k)
-	mac.Write([]byte(protocol.SessionIDHMACKey))
-	full := mac.Sum(nil)
-	want := hex.EncodeToString(full[:protocol.SessionIDLen])
+	code := []byte("thunder-eagle-river-moon-stone-fire")
+	want := hex.EncodeToString(argon2.IDKey(
+		code,
+		[]byte(protocol.SessionIDArgonSalt),
+		protocol.SessionIDArgonTime,
+		protocol.SessionIDArgonMemory,
+		protocol.SessionIDArgonThreads,
+		protocol.SessionIDLen,
+	))
 
-	got := DeriveSessionID(k)
+	got := DeriveSessionID(code)
 	if got != want {
 		t.Errorf("DeriveSessionID = %q, want %q", got, want)
 	}
 }
 
 func TestDeriveSessionIDLength(t *testing.T) {
-	k := make([]byte, 32)
-	sid := DeriveSessionID(k)
+	code := []byte("abandon-abandon-abandon-abandon-abandon-abandon")
+	sid := DeriveSessionID(code)
 	if len(sid) != protocol.SessionIDLen*2 {
 		t.Errorf("session ID length = %d, want %d hex chars", len(sid), protocol.SessionIDLen*2)
 	}
 }
 
 func TestDeriveSessionIDDeterministic(t *testing.T) {
-	k := make([]byte, 32)
-	k[0] = 0x42
-	s1 := DeriveSessionID(k)
-	s2 := DeriveSessionID(k)
+	code := []byte("thunder-eagle-river-moon-stone-fire")
+	s1 := DeriveSessionID(code)
+	s2 := DeriveSessionID(code)
 	if s1 != s2 {
-		t.Errorf("same key produced different session IDs: %q vs %q", s1, s2)
+		t.Errorf("same code produced different session IDs: %q vs %q", s1, s2)
 	}
 }
 
-func TestDeriveSessionIDDifferentKeys(t *testing.T) {
-	k1 := make([]byte, 32)
-	k2 := make([]byte, 32)
-	k2[0] = 1
-	s1 := DeriveSessionID(k1)
-	s2 := DeriveSessionID(k2)
+func TestDeriveSessionIDDifferentCodes(t *testing.T) {
+	c1 := []byte("thunder-eagle-river-moon-stone-fire")
+	c2 := []byte("abandon-abandon-abandon-abandon-abandon-abandon")
+	s1 := DeriveSessionID(c1)
+	s2 := DeriveSessionID(c2)
 	if s1 == s2 {
-		t.Error("different keys produced the same session ID")
+		t.Error("different codes produced the same session ID")
 	}
 }
 

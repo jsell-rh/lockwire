@@ -154,7 +154,7 @@ func extractUnicastPayload(msg []byte) (viewerID string, payload []byte) {
 // --- Tests ---
 
 func TestSharerStreamsEncryptedFrames(t *testing.T) {
-	sess, err := session.NewSession()
+	sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestSharerStreamsEncryptedFrames(t *testing.T) {
 }
 
 func TestSharerSPAKE2Handshake(t *testing.T) {
-	sess, err := session.NewSession()
+	sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestSharerSPAKE2Handshake(t *testing.T) {
 }
 
 func TestSharerCancelStopsCleanly(t *testing.T) {
-	sess, err := session.NewSession()
+	sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}

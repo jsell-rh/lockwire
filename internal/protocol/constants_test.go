@@ -3,8 +3,8 @@ package protocol
 import "testing"
 
 func TestConstantsMatchSpec(t *testing.T) {
-	if SessionIDHMACKey != "lw-session-id" {
-		t.Errorf("SessionIDHMACKey = %q, want %q", SessionIDHMACKey, "lw-session-id")
+	if SessionIDArgonSalt != "lockwire-session-id-v1" {
+		t.Errorf("SessionIDArgonSalt = %q, want %q", SessionIDArgonSalt, "lockwire-session-id-v1")
 	}
 	if EpochKeyInfoPrefix != "lw-epoch-" {
 		t.Errorf("EpochKeyInfoPrefix = %q, want %q", EpochKeyInfoPrefix, "lw-epoch-")

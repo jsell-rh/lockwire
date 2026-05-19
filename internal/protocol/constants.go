@@ -1,7 +1,7 @@
 package protocol
 
 const (
-	SessionIDHMACKey    = "lw-session-id"
+	SessionIDArgonSalt  = "lockwire-session-id-v1"
 	EpochKeyInfoPrefix  = "lw-epoch-"
 	AuthKeyInfo         = "lw-auth-key"
 	SPAKE2AssociatedData = "lockwire-v1"
@@ -13,6 +13,10 @@ const (
 	GCMTagLen    = 16
 
 	CodeWordCount = 6
+
+	SessionIDArgonTime    = 1
+	SessionIDArgonMemory  = 64 * 1024 // 64 MiB in KiB
+	SessionIDArgonThreads = 1
 
 	ClientTypeCLI     = "cli"
 	ClientTypeBrowser = "browser"

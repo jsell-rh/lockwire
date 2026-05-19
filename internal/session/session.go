@@ -52,7 +52,7 @@ func WithClock(clock func() time.Time) Option {
 	}
 }
 
-func NewSession(opts ...Option) (*Session, error) {
+func NewSession(code []byte, opts ...Option) (*Session, error) {
 	k, err := crypto.GenerateStreamKey()
 	if err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
@@ -60,7 +60,7 @@ func NewSession(opts ...Option) (*Session, error) {
 
 	s := &Session{
 		streamKey:  k,
-		sessionID:  crypto.DeriveSessionID(k),
+		sessionID:  crypto.DeriveSessionID(code),
 		nonce:      crypto.NewNonceCounter(),
 		viewers:    make(map[string]*viewer),
 		revokedIDs: make(map[string]bool),
@@ -173,7 +173,6 @@ func (s *Session) RevokeViewer(viewerID string) (map[string]EncryptedPayload, er
 
 	crypto.ZeroBytes(s.streamKey)
 	s.streamKey = kPrime
-	s.sessionID = crypto.DeriveSessionID(kPrime)
 
 	return rekeys, nil
 }

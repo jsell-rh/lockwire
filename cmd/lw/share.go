@@ -32,7 +32,7 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		return fmt.Errorf("generating code: %w", err)
 	}
 
-	sess, err := session.NewSession()
+	sess, err := session.NewSession([]byte(pairingCode))
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}

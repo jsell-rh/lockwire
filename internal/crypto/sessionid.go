@@ -1,16 +1,20 @@
 package crypto
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 
 	"github.com/jsell-rh/lockwire/internal/protocol"
+	"golang.org/x/crypto/argon2"
 )
 
-func DeriveSessionID(k []byte) string {
-	mac := hmac.New(sha256.New, k)
-	mac.Write([]byte(protocol.SessionIDHMACKey))
-	full := mac.Sum(nil)
-	return hex.EncodeToString(full[:protocol.SessionIDLen])
+func DeriveSessionID(code []byte) string {
+	raw := argon2.IDKey(
+		code,
+		[]byte(protocol.SessionIDArgonSalt),
+		protocol.SessionIDArgonTime,
+		protocol.SessionIDArgonMemory,
+		protocol.SessionIDArgonThreads,
+		protocol.SessionIDLen,
+	)
+	return hex.EncodeToString(raw)
 }
