@@ -13,6 +13,7 @@ import (
 	"github.com/jsell-rh/lockwire/internal/crypto"
 	"github.com/jsell-rh/lockwire/internal/viewer"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 func newJoinCmd() *cobra.Command {
@@ -78,6 +79,18 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 
 	probe := &stdoutViewerProbe{out: cmd.ErrOrStderr()}
 	v := viewer.New(relay, []byte(normalized), os.Stdout, probe)
+
+	stderr := cmd.ErrOrStderr()
+	v.SetResizeHandler(func(cols, rows uint16) {
+		ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+		if err != nil {
+			return
+		}
+		if ws.Col < cols || ws.Row < rows {
+			fmt.Fprintf(stderr, "\r[terminal too small — sharer: %d×%d, you: %d×%d]\n",
+				cols, rows, ws.Col, ws.Row)
+		}
+	})
 
 	err = v.Run(ctx)
 

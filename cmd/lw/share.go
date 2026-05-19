@@ -11,10 +11,11 @@ import (
 
 	"github.com/jsell-rh/lockwire/internal/code"
 	"github.com/jsell-rh/lockwire/internal/ipc"
+	lwpty "github.com/jsell-rh/lockwire/internal/pty"
 	"github.com/jsell-rh/lockwire/internal/session"
 	"github.com/jsell-rh/lockwire/internal/sharer"
-	lwpty "github.com/jsell-rh/lockwire/internal/pty"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
@@ -59,7 +60,13 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		shell = "/bin/sh"
 	}
 
-	term, err := lwpty.Start([]string{shell}, lwpty.Size{Cols: 80, Rows: 24}, nil)
+	initSize := lwpty.Size{Cols: 80, Rows: 24}
+	if ws, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ); err == nil {
+		initSize.Cols = ws.Col
+		initSize.Rows = ws.Row
+	}
+
+	term, err := lwpty.Start([]string{shell}, initSize, nil)
 	if err != nil {
 		return fmt.Errorf("starting terminal: %w", err)
 	}
@@ -94,17 +101,21 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	defer ipcSrv.Close()
 	go ipcSrv.Serve()
 
-	// Handle SIGWINCH for terminal resize.
+	_ = sh.SetTermSize(ctx, initSize.Cols, initSize.Rows)
+
 	sigwinch := make(chan os.Signal, 1)
 	signal.Notify(sigwinch, syscall.SIGWINCH)
 	go func() {
 		for range sigwinch {
-			// In a real implementation, we'd get the actual terminal size.
-			// For now, the PTY starts with the initial size.
+			ws, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
+			if err != nil {
+				continue
+			}
+			term.Resize(ws.Col, ws.Row)
+			sh.SetTermSize(ctx, ws.Col, ws.Row)
 		}
 	}()
 
-	// Handle SIGINT/SIGTERM for graceful shutdown.
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
