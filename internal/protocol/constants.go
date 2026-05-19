@@ -41,6 +41,14 @@ const (
 	CtrlSessionFull      byte = 0x05
 	CtrlSessionIDConflict byte = 0x06
 
+	// IPC control socket.
+	IPCSocketPrefix = "lw-"
+	IPCSocketSuffix = ".sock"
+	IPCPIDFile      = "lw.pid"
+
+	IPCCommandList   = "list"
+	IPCCommandRevoke = "revoke"
+
 	// Relay limits.
 	DefaultMaxViewers       = 20
 	ViewerBufferLimitBytes  = 512 * 1024 // 512 KB outbound buffer before disconnect
