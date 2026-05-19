@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/jsell-rh/lockwire/internal/ipc"
@@ -26,10 +27,10 @@ func runRevoke(cmd *cobra.Command, viewerID string) error {
 	}
 
 	if err := ipc.ClientRevoke(sockPath, viewerID); err != nil {
-		if err.Error() == "viewer not found" {
+		if errors.Is(err, ipc.ErrViewerNotFound) || err.Error() == "viewer not found" {
 			return fmt.Errorf("viewer not found")
 		}
-		return fmt.Errorf("no active session")
+		return fmt.Errorf("revoking viewer: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "revoked %s\n", viewerID)

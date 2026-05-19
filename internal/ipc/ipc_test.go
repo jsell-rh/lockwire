@@ -217,6 +217,29 @@ func TestServerUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestServerSocketPermissions(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "lw-test.sock")
+
+	sess := &fakeSession{}
+	srv, err := NewServer(sockPath, sess, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	go srv.Serve()
+	defer srv.Close()
+
+	info, err := os.Stat(sockPath)
+	if err != nil {
+		t.Fatalf("stat socket: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("socket permissions = %o, want 0600", perm)
+	}
+}
+
 func TestServerCleanupSocket(t *testing.T) {
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "lw-test.sock")

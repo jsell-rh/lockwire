@@ -68,6 +68,10 @@ func NewServer(sockPath string, handler SessionHandler, probe Probe) (*Server, e
 	if err != nil {
 		return nil, fmt.Errorf("listening on %s: %w", sockPath, err)
 	}
+	if err := os.Chmod(sockPath, 0600); err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("setting socket permissions: %w", err)
+	}
 
 	return &Server{
 		listener: ln,
