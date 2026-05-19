@@ -129,6 +129,49 @@ The relay SHALL tear down a session when the Sharer disconnects (cleanly or via 
 
 ---
 
+### Requirement: Rate Limiting and Abuse Prevention
+
+The relay SHALL enforce per-IP rate limits on all connection activity. Limits are configurable at deploy time; the defaults below apply to the public relay. Self-hosted deployments MAY adjust thresholds.
+
+The relay SHALL maintain a denylist of banned IPs and reject all connections from banned IPs at the TCP/WebSocket accept stage, before any application-layer processing.
+
+**Default limits (all configurable):**
+
+| Activity | Limit | Window |
+|----------|-------|--------|
+| New WebSocket connections | 20 | per minute |
+| Failed SPAKE2 handshakes | 5 | per 10 minutes |
+| Session registrations (Sharer) | 5 | per minute |
+
+**Ban triggers:** An IP SHALL be banned when it exceeds any rate limit threshold by 3× within a single window, or accumulates 3 distinct rate limit violations within 1 hour.
+
+**Ban duration:** Bans are progressive — 1 hour for the first ban, 24 hours for the second, permanent for the third. Permanent bans require manual operator removal.
+
+The relay SHALL log the triggering event for every ban (IP, threshold breached, timestamp) to support operator review.
+
+**Implementation note:** The rate limiting and banning mechanism is a deployment concern — it MAY be implemented in the relay process itself, in a reverse proxy (nginx, Caddy), or at the network edge (Cloudflare, WAF). The observable behavior (what clients receive, what gets logged) is what this requirement specifies.
+
+#### Scenario: Connection rate exceeded
+- GIVEN an IP has opened 20 WebSocket connections in the past minute
+- WHEN a 21st connection attempt arrives from the same IP
+- THEN the relay closes the connection immediately after the TLS handshake
+- AND returns HTTP 429 before the WebSocket upgrade
+
+#### Scenario: Repeated handshake failures trigger ban
+- GIVEN an IP has failed 15 SPAKE2 handshakes in 10 minutes (3× the threshold)
+- WHEN the relay detects the threshold breach
+- THEN the IP is added to the denylist for 1 hour
+- AND all subsequent connections from that IP are rejected at accept time with HTTP 403
+- AND the ban event is logged
+
+#### Scenario: Banned IP attempts reconnection
+- GIVEN an IP is on the denylist
+- WHEN any connection arrives from that IP
+- THEN the relay rejects it immediately (HTTP 403) with no further processing
+- AND no rate limit counters are incremented (ban check precedes rate limiting)
+
+---
+
 ### Requirement: Relay Opacity
 
 The relay SHALL be architecturally incapable of reading session content. This is enforced by design: the relay never receives the Code or the Stream Key. All `0x02` blobs it forwards are AES-256-GCM ciphertext; any modification produces an authentication failure on the Viewer side.
