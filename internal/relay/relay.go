@@ -209,10 +209,11 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 				continue
 			}
 			targetID := string(data[1 : 1+protocol.ViewerIDLen])
+			payload := data[1+protocol.ViewerIDLen:]
 			sess.mu.Lock()
 			if vc, ok := sess.viewers[targetID]; ok {
 				select {
-				case vc.send <- data:
+				case vc.send <- payload:
 				default:
 					close(vc.send)
 					vc.conn.Close(websocket.StatusPolicyViolation, "slow consumer")

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -54,9 +53,6 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 
 	sessionID := crypto.DeriveSessionID([]byte(normalized))
 	watchURL := relayURL + "/api/watch/" + sessionID
-	if !insecure {
-		watchURL = strings.Replace(watchURL, "wss://", "wss://", 1)
-	}
 
 	fmt.Fprint(cmd.ErrOrStderr(), "connecting…")
 

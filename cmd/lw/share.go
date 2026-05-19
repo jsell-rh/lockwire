@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -41,9 +40,6 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	sessionID := sess.SessionID()
 
 	shareURL := relayURL + "/api/share/" + sessionID
-	if !insecure {
-		shareURL = strings.Replace(shareURL, "wss://", "wss://", 1)
-	}
 
 	connectCtx, connectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer connectCancel()

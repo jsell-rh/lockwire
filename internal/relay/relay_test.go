@@ -236,11 +236,9 @@ func TestUnicastToViewer(t *testing.T) {
 	writeMsg(t, sharer, msg)
 
 	got := readMsg(t, viewer)
-	if got[0] != protocol.MsgTypeUnicast {
-		t.Errorf("type = 0x%02x, want 0x%02x", got[0], protocol.MsgTypeUnicast)
-	}
-	if string(got) != string(msg) {
-		t.Errorf("viewer got %x, want %x", got, msg)
+	wantPayload := []byte{0xCA, 0xFE, 0x00}
+	if string(got) != string(wantPayload) {
+		t.Errorf("viewer got %x, want %x (relay should strip type+viewerID)", got, wantPayload)
 	}
 }
 
