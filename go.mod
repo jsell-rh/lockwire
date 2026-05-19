@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/coder/websocket v1.8.14 // indirect
 	go.dedis.ch/fixbuf v1.0.3 // indirect
 	go.dedis.ch/kyber/v4 v4.0.0-pre2 // indirect
 )

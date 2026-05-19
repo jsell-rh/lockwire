@@ -25,6 +25,14 @@ const (
 	MsgTypePong      byte = 0x05 // Relay → either (pong)
 	MsgTypeControl   byte = 0x06 // Relay → Viewer (session control)
 
+	// Control frame sub-types (payload byte after MsgTypeControl).
+	CtrlRegistrationAck  byte = 0x01
+	CtrlJoinAck          byte = 0x02
+	CtrlSessionNotFound  byte = 0x03
+	CtrlSessionEnded     byte = 0x04
+	CtrlSessionFull      byte = 0x05
+	CtrlSessionIDConflict byte = 0x06
+
 	// Relay limits.
 	DefaultMaxViewers       = 20
 	ViewerBufferLimitBytes  = 512 * 1024 // 512 KB outbound buffer before disconnect
