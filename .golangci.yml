@@ -1,0 +1,54 @@
+linters:
+  enable:
+    - errcheck       # never ignore returned errors
+    - gosec          # security-focused static analysis
+    - govet          # go vet checks
+    - staticcheck    # comprehensive static analysis
+    - unused         # dead code
+    - misspell       # typos in comments and strings
+    - gocritic       # opinionated but useful style checks
+    - revive         # fast, configurable linter (replaces golint)
+    - nilerr         # return nil instead of err by mistake
+    - bodyclose      # http response body must be closed
+    - contextcheck   # context propagation
+    - exhaustive     # exhaustive switch on enums
+
+linters-settings:
+  gosec:
+    excludes:
+      - G104  # errors unhandled — covered by errcheck
+    config:
+      global:
+        # Treat any crypto weakness as an error
+        severity: high
+        confidence: medium
+
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  gocritic:
+    disabled-checks:
+      - commentedOutCode
+
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+      - name: error-strings
+        severity: warning
+
+issues:
+  exclude-rules:
+    # Test files: allow some flexibility
+    - path: "_test\\.go"
+      linters:
+        - gosec
+        - errcheck
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  go: "1.22"

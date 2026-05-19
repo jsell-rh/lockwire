@@ -17,7 +17,7 @@ Spawn a subagent with instructions found verbatim in <repo_root>/workflows/devel
 
 Read actual code and existing specs in the affected areas. Confirm your understanding without wasting the user's time.
 
-Proceed with test driven development. Tests should share reusable components where possible,
+Proceed with test-driven development. Tests should share reusable components where possible,
 use fakes instead of mocks, and test real behavior. If the tests pass but the software crashes,
 the tests did not do their job.
 
@@ -27,14 +27,28 @@ Follow implementation guidelines found in AGENTS.md.
 
 ### Phase 4 — Critic Pass
 
-Spawn critics in parallel to review the implementation. Standard critics:
-- Data shape and wire protocol correctness
-- Security review (key material handling, memory zeroing, no secrets in logs)
-- Consistency and code style (no magic strings — use constants)
-- Test coverage
-- Verify actual functionality by running the real binary from the command line, not just via test harnesses. If the work produces a CLI command, run it. Tests verify code correctness — this critic verifies that the software actually works when a user runs it.
+Spawn critics in parallel to review the implementation:
 
-Plus work-driven critics based on the scope of the unit of work.
+**Standard critics (every unit of work):**
+
+- **Security invariants** — verify each of the invariants in AGENTS.md § Security Invariants:
+  - No key material in logs, errors, or panic output
+  - zeroBytes() called on all key slices before release
+  - Nonce counter never resets within a (key, session) pair
+  - Relay package does not import internal/crypto or handle key types
+  - HKDF info strings match the constants in internal/protocol exactly
+  - K_auth_i is retained for the session lifetime (not discarded post-handshake)
+  - AES-256-GCM used — no ChaCha20 or other cipher
+- **Protocol correctness** — message framing matches the type-byte table in the relay spec; Session ID derived correctly
+- **Consistency and style** — no magic strings (all constants in internal/protocol), error wrapping with %w, no global mutable state
+- **Test coverage** — fakes not mocks, known-answer vectors for crypto, race detector exercised for concurrent code
+- **Smoke test** — run the actual binary from the command line. Tests verify code correctness; this critic verifies the software works when a user runs it.
+
+**Work-driven critics (add based on scope):**
+- If touching crypto: verify SPAKE2 parameters (role A/B, associated data "lockwire-v1"), AES-GCM tag length (128-bit), HKDF output length (32 bytes)
+- If touching relay: verify relay package has no access to key material; verify fan-out ordering; verify unicast routing by Viewer ID
+- If touching web viewer: verify WebCrypto API usage (crypto.subtle only), strict TypeScript, SPAKE2 interop with Go implementation
+- If touching IPC: verify Unix socket path from constants, not hardcoded
 
 ### Phase 5–6 — Synthesize and Present
 

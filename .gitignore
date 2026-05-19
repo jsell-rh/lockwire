@@ -1,19 +1,17 @@
 # Go
 /lw
-/lw-relay
+/dist/
 *.exe
 *.test
 *.out
 vendor/
-go.sum
 
 # TypeScript / Node
 node_modules/
-dist/
+web/dist/
 *.js.map
 *.d.ts.map
 .parcel-cache/
-.next/
 
 # OS
 .DS_Store

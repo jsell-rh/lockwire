@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "→ go vet"
+go vet ./...
+
+echo "→ golangci-lint (fast)"
+golangci-lint run --fast
+
+echo "→ go build"
+go build ./...
+
+if [ -f web/package.json ]; then
+  echo "→ tsc --noEmit"
+  cd web && npx tsc --noEmit
+fi
+
+echo "✓ pre-commit passed"
