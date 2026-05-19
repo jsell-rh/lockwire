@@ -20,6 +20,7 @@ func newRootCmd(ver string) *cobra.Command {
 
 	root.SetVersionTemplate("lw {{.Version}}\n")
 	root.AddCommand(newShareCmd())
+	root.AddCommand(newJoinCmd())
 
 	return root
 }
