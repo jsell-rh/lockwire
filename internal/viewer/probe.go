@@ -9,6 +9,7 @@ type Probe interface {
 	SessionEnded(reason string)
 	HandshakeFailed(err error)
 	HeartbeatSent()
+	TerminalResized(cols, rows uint16)
 }
 
 type noopProbe struct{}
@@ -21,3 +22,4 @@ func (noopProbe) AccessRevoked()                 {}
 func (noopProbe) SessionEnded(string)            {}
 func (noopProbe) HandshakeFailed(error)          {}
 func (noopProbe) HeartbeatSent()                 {}
+func (noopProbe) TerminalResized(uint16, uint16) {}

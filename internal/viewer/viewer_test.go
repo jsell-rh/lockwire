@@ -117,6 +117,11 @@ type recordingProbe struct {
 	heartbeats     int
 	keyRotations   int
 	accessRevoked  bool
+	resizes        []sizeEvent
+}
+
+type sizeEvent struct {
+	cols, rows uint16
 }
 
 func (p *recordingProbe) Connecting()                    { p.mu.Lock(); p.connecting = true; p.mu.Unlock() }
@@ -127,6 +132,11 @@ func (p *recordingProbe) AccessRevoked()                 { p.mu.Lock(); p.access
 func (p *recordingProbe) SessionEnded(reason string)     { p.mu.Lock(); p.ended = reason; p.mu.Unlock() }
 func (p *recordingProbe) HandshakeFailed(err error)      { p.mu.Lock(); p.hsFailed = err; p.mu.Unlock() }
 func (p *recordingProbe) HeartbeatSent()                 { p.mu.Lock(); p.heartbeats++; p.mu.Unlock() }
+func (p *recordingProbe) TerminalResized(cols, rows uint16) {
+	p.mu.Lock()
+	p.resizes = append(p.resizes, sizeEvent{cols, rows})
+	p.mu.Unlock()
+}
 
 // --- Sharer-side handshake helper ---
 
@@ -1032,7 +1042,258 @@ func TestMultipleSequentialKeyRotations(t *testing.T) {
 	<-errCh
 }
 
+// --- Terminal Size Tests ---
+
+func TestViewerReceivesTerminalSize(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	// Build and send a MsgTypeTermSize frame
+	sizePlaintext := make([]byte, 4)
+	binary.BigEndian.PutUint16(sizePlaintext[0:2], 120)
+	binary.BigEndian.PutUint16(sizePlaintext[2:4], 40)
+
+	ct, nonce, epoch, err := sess.EncryptFrame(sizePlaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildTermSizeFrame(ct, nonce, epoch)
+
+	waitForResize(t, probe)
+
+	probe.mu.Lock()
+	if len(probe.resizes) != 1 {
+		t.Fatalf("expected 1 resize event, got %d", len(probe.resizes))
+	}
+	if probe.resizes[0].cols != 120 || probe.resizes[0].rows != 40 {
+		t.Errorf("resize = %dx%d, want 120x40", probe.resizes[0].cols, probe.resizes[0].rows)
+	}
+	probe.mu.Unlock()
+
+	if v.SharerSize().Cols != 120 || v.SharerSize().Rows != 40 {
+		t.Errorf("SharerSize = %dx%d, want 120x40", v.SharerSize().Cols, v.SharerSize().Rows)
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestViewerResizeCallback(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	var callbackCols, callbackRows uint16
+	callbackCalled := make(chan struct{}, 1)
+	v.SetResizeHandler(func(cols, rows uint16) {
+		callbackCols = cols
+		callbackRows = rows
+		select {
+		case callbackCalled <- struct{}{}:
+		default:
+		}
+	})
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	sizePlaintext := make([]byte, 4)
+	binary.BigEndian.PutUint16(sizePlaintext[0:2], 200)
+	binary.BigEndian.PutUint16(sizePlaintext[2:4], 50)
+
+	ct, nonce, epoch, err := sess.EncryptFrame(sizePlaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildTermSizeFrame(ct, nonce, epoch)
+
+	select {
+	case <-callbackCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resize callback not called")
+	}
+
+	if callbackCols != 200 || callbackRows != 50 {
+		t.Errorf("callback size = %dx%d, want 200x50", callbackCols, callbackRows)
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestTermSizeSkippedDuringHandshake(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	// Send join ack
+	relay.incoming <- []byte{protocol.MsgTypeControl, protocol.CtrlJoinAck, 'v', '0', '0', '0', '0', '0'}
+	waitForSent(t, relay, 1)
+
+	// Inject a MsgTypeTermSize frame mid-handshake — it should be skipped
+	sizePlaintext := make([]byte, 4)
+	binary.BigEndian.PutUint16(sizePlaintext[0:2], 120)
+	binary.BigEndian.PutUint16(sizePlaintext[2:4], 40)
+	ct, nonce, epoch, err := sess.EncryptFrame(sizePlaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sizeFrame := buildTermSizeFrame(ct, nonce, epoch)
+	relay.incoming <- sizeFrame
+
+	// Now complete the handshake normally
+	sharerSpake, err := crypto.NewSPAKE2Sharer(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sharerSpake.Destroy()
+
+	msgA, err := sharerSpake.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- msgA
+
+	waitForSent(t, relay, 2)
+	sent := relay.getSent()
+	msgB := sent[1][1:]
+
+	confirmA, err := sharerSpake.Finish(msgB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- confirmA
+
+	waitForSent(t, relay, 3)
+	sent = relay.getSent()
+	confirmB := sent[2][1:]
+
+	if err := sharerSpake.Verify(confirmB); err != nil {
+		t.Fatal(err)
+	}
+
+	spakeSecret, err := sharerSpake.SessionKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(spakeSecret)
+
+	authKey, err := crypto.DeriveAuthKey(spakeSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, encPayload, err := sess.RegisterViewer(authKey, protocol.ClientTypeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delivery := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(encPayload.Ciphertext))
+	copy(delivery[:protocol.ViewerIDLen], info.ID)
+	copy(delivery[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], encPayload.Nonce)
+	copy(delivery[protocol.ViewerIDLen+protocol.NonceLen:], encPayload.Ciphertext)
+	relay.incoming <- delivery
+
+	waitForProbe(t, probe)
+
+	// Verify handshake completed despite the injected size frame
+	if probe.completed == "" {
+		t.Fatal("handshake did not complete after size frame injection")
+	}
+
+	// The size frame was injected during handshake and should have been skipped
+	probe.mu.Lock()
+	resizeCount := len(probe.resizes)
+	probe.mu.Unlock()
+	if resizeCount != 0 {
+		t.Errorf("expected 0 resize events during handshake, got %d", resizeCount)
+	}
+
+	cancel()
+	<-errCh
+}
+
 // --- Helpers ---
+
+func buildTermSizeFrame(ciphertext, nonce []byte, epoch uint64) []byte {
+	buf := make([]byte, 1+8+protocol.NonceLen+len(ciphertext))
+	buf[0] = protocol.MsgTypeTermSize
+	binary.BigEndian.PutUint64(buf[1:9], epoch)
+	copy(buf[9:9+protocol.NonceLen], nonce)
+	copy(buf[9+protocol.NonceLen:], ciphertext)
+	return buf
+}
+
+func waitForResize(t *testing.T, probe *recordingProbe) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		probe.mu.Lock()
+		done := len(probe.resizes) > 0
+		probe.mu.Unlock()
+		if done {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("resize not received")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
 
 func waitForKeyRotation(t *testing.T, probe *recordingProbe) {
 	t.Helper()

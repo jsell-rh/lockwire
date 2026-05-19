@@ -27,6 +27,11 @@ type RelayConn interface {
 	Close() error
 }
 
+type TermSize struct {
+	Cols uint16
+	Rows uint16
+}
+
 type Viewer struct {
 	relay              RelayConn
 	code               []byte
@@ -39,6 +44,8 @@ type Viewer struct {
 	consecutiveFailures int
 	done               chan struct{}
 	cancel             context.CancelFunc
+	sharerSize         TermSize
+	onResize           func(cols, rows uint16)
 }
 
 func New(relay RelayConn, code []byte, output io.Writer, probe Probe) *Viewer {
@@ -52,6 +59,14 @@ func New(relay RelayConn, code []byte, output io.Writer, probe Probe) *Viewer {
 		probe:  probe,
 		done:   make(chan struct{}),
 	}
+}
+
+func (v *Viewer) SetResizeHandler(fn func(cols, rows uint16)) {
+	v.onResize = fn
+}
+
+func (v *Viewer) SharerSize() TermSize {
+	return v.sharerSize
 }
 
 func (v *Viewer) Run(ctx context.Context) error {
@@ -186,6 +201,8 @@ func (v *Viewer) recvHandshakeMsg(ctx context.Context) ([]byte, error) {
 		switch data[0] {
 		case protocol.MsgTypeStream:
 			continue
+		case protocol.MsgTypeTermSize:
+			continue
 		case protocol.MsgTypePong:
 			continue
 		case protocol.MsgTypeControl:
@@ -267,6 +284,8 @@ func (v *Viewer) streamLoop(ctx context.Context) error {
 				continue
 			}
 			v.consecutiveFailures = 0
+		case protocol.MsgTypeTermSize:
+			v.decryptAndApplySize(data)
 		case protocol.MsgTypeControl:
 			if len(data) >= 2 && data[1] == protocol.CtrlSessionEnded {
 				v.probe.SessionEnded("sharer disconnected")
@@ -343,6 +362,42 @@ func (v *Viewer) decryptAndWrite(frame []byte) error {
 	v.output.Write(plaintext)
 	v.probe.FrameDecrypted(epoch, len(plaintext))
 	return nil
+}
+
+func (v *Viewer) decryptAndApplySize(frame []byte) {
+	headerLen := 1 + 8 + protocol.NonceLen
+	if len(frame) < headerLen+protocol.GCMTagLen+4 {
+		return
+	}
+
+	epoch := binary.BigEndian.Uint64(frame[1:9])
+	nonce := frame[9 : 9+protocol.NonceLen]
+	ciphertext := frame[9+protocol.NonceLen:]
+
+	epochKey, err := crypto.DeriveEpochKey(v.streamKey, epoch)
+	if err != nil {
+		return
+	}
+	defer crypto.ZeroBytes(epochKey)
+
+	plaintext, err := crypto.Open(epochKey, nonce, ciphertext)
+	if err != nil {
+		return
+	}
+
+	if len(plaintext) < 4 {
+		return
+	}
+
+	cols := binary.BigEndian.Uint16(plaintext[0:2])
+	rows := binary.BigEndian.Uint16(plaintext[2:4])
+
+	v.sharerSize = TermSize{Cols: cols, Rows: rows}
+	v.probe.TerminalResized(cols, rows)
+
+	if v.onResize != nil {
+		v.onResize(cols, rows)
+	}
 }
 
 func (v *Viewer) heartbeatLoop(ctx context.Context) {

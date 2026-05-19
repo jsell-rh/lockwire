@@ -26,3 +26,5 @@ func (p *stdoutViewerProbe) SessionEnded(string) {}
 func (p *stdoutViewerProbe) HandshakeFailed(error) {}
 
 func (p *stdoutViewerProbe) HeartbeatSent() {}
+
+func (p *stdoutViewerProbe) TerminalResized(uint16, uint16) {}
