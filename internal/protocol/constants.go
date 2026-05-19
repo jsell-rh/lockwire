@@ -11,6 +11,8 @@ const (
 	ViewerIDLen  = 6
 	GCMTagLen    = 16
 
+	CodeWordCount = 6
+
 	EpochDurationSec       = 60
 	EpochGracePeriodSec    = 5
 	ViewerIDCharset        = "abcdefghijklmnopqrstuvwxyz0123456789"
