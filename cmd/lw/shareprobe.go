@@ -26,3 +26,5 @@ func (p *stdoutSharerProbe) ViewerLeft(viewerID string) {
 func (p *stdoutSharerProbe) HandshakeFailed(viewerID string, err error) {
 	fmt.Fprintf(p.out, "handshake failed for viewer %s\n", viewerID)
 }
+
+func (p *stdoutSharerProbe) TerminalSizeBroadcast(uint16, uint16) {}

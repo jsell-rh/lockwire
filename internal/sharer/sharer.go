@@ -34,6 +34,8 @@ type Sharer struct {
 	mu         sync.Mutex
 	done       chan struct{}
 	cancel     context.CancelFunc
+	termCols   uint16
+	termRows   uint16
 }
 
 type handshakeState int
@@ -112,6 +114,34 @@ func (s *Sharer) Revoke(ctx context.Context, viewerID string) error {
 	}
 
 	s.probe.ViewerLeft(viewerID)
+	return nil
+}
+
+func (s *Sharer) SetTermSize(ctx context.Context, cols, rows uint16) error {
+	s.mu.Lock()
+	s.termCols = cols
+	s.termRows = rows
+	s.mu.Unlock()
+
+	return s.broadcastTermSize(ctx, cols, rows)
+}
+
+func (s *Sharer) broadcastTermSize(ctx context.Context, cols, rows uint16) error {
+	plaintext := make([]byte, 4)
+	binary.BigEndian.PutUint16(plaintext[0:2], cols)
+	binary.BigEndian.PutUint16(plaintext[2:4], rows)
+
+	ct, nonce, epoch, err := s.sess.EncryptFrame(plaintext)
+	if err != nil {
+		return fmt.Errorf("encrypting terminal size: %w", err)
+	}
+
+	frame := buildTermSizeFrame(ct, nonce, epoch)
+	if err := s.relay.Send(ctx, frame); err != nil {
+		return fmt.Errorf("broadcasting terminal size: %w", err)
+	}
+
+	s.probe.TerminalSizeBroadcast(cols, rows)
 	return nil
 }
 
@@ -223,6 +253,13 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 
 		hs.state = hsComplete
 		s.probe.ViewerJoined(info.ID, protocol.ClientTypeCLI)
+
+		s.mu.Lock()
+		cols, rows := s.termCols, s.termRows
+		s.mu.Unlock()
+		if cols > 0 && rows > 0 {
+			_ = s.broadcastTermSize(ctx, cols, rows)
+		}
 	}
 	return nil
 }
@@ -290,9 +327,17 @@ func (s *Sharer) streamLoop(ctx context.Context, output io.Reader) error {
 }
 
 func buildStreamFrame(ciphertext, nonce []byte, epoch uint64) []byte {
-	// Format: type(1) + epoch(8) + nonce(12) + ciphertext
 	buf := make([]byte, 1+8+protocol.NonceLen+len(ciphertext))
 	buf[0] = protocol.MsgTypeStream
+	binary.BigEndian.PutUint64(buf[1:9], epoch)
+	copy(buf[9:9+protocol.NonceLen], nonce)
+	copy(buf[9+protocol.NonceLen:], ciphertext)
+	return buf
+}
+
+func buildTermSizeFrame(ciphertext, nonce []byte, epoch uint64) []byte {
+	buf := make([]byte, 1+8+protocol.NonceLen+len(ciphertext))
+	buf[0] = protocol.MsgTypeTermSize
 	binary.BigEndian.PutUint64(buf[1:9], epoch)
 	copy(buf[9:9+protocol.NonceLen], nonce)
 	copy(buf[9+protocol.NonceLen:], ciphertext)

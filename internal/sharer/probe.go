@@ -9,15 +9,17 @@ type Probe interface {
 	SessionTerminated(reason string)
 	HandshakeFailed(viewerID string, err error)
 	HeartbeatSent()
+	TerminalSizeBroadcast(cols, rows uint16)
 }
 
 type noopProbe struct{}
 
-func (noopProbe) SessionCreated(string, string)      {}
-func (noopProbe) RelayConnected(string)               {}
+func (noopProbe) SessionCreated(string, string)        {}
+func (noopProbe) RelayConnected(string)                {}
 func (noopProbe) ViewerJoined(string, string)          {}
 func (noopProbe) ViewerLeft(string)                    {}
 func (noopProbe) FrameStreamed(uint64, int)             {}
 func (noopProbe) SessionTerminated(string)             {}
 func (noopProbe) HandshakeFailed(string, error)        {}
 func (noopProbe) HeartbeatSent()                       {}
+func (noopProbe) TerminalSizeBroadcast(uint16, uint16) {}
