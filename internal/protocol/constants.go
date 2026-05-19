@@ -14,6 +14,9 @@ const (
 
 	CodeWordCount = 6
 
+	ClientTypeCLI     = "cli"
+	ClientTypeBrowser = "browser"
+
 	EpochDurationSec    = 60
 	EpochGracePeriodSec = 5
 	ViewerIDCharset     = "abcdefghijklmnopqrstuvwxyz0123456789"

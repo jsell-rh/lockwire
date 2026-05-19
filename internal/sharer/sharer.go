@@ -68,6 +68,7 @@ func New(sess *session.Session, relay RelayConn, code []byte, probe Probe) *Shar
 func (s *Sharer) Run(ctx context.Context, output io.Reader) error {
 	ctx, s.cancel = context.WithCancel(ctx)
 	defer close(s.done)
+	defer s.destroyPendingHandshakes()
 
 	errCh := make(chan error, 2)
 
@@ -190,10 +191,10 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 			s.cleanupHandshake(relayViewerID)
 			return fmt.Errorf("deriving auth key: %w", err)
 		}
+		defer crypto.ZeroBytes(authKey)
 
-		info, encPayload, err := s.sess.RegisterViewer(authKey, "cli")
+		info, encPayload, err := s.sess.RegisterViewer(authKey, protocol.ClientTypeCLI)
 		if err != nil {
-			crypto.ZeroBytes(authKey)
 			s.cleanupHandshake(relayViewerID)
 			return fmt.Errorf("registering viewer: %w", err)
 		}
@@ -204,7 +205,7 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 		}
 
 		hs.state = hsComplete
-		s.probe.ViewerJoined(info.ID, "cli")
+		s.probe.ViewerJoined(info.ID, protocol.ClientTypeCLI)
 	}
 	return nil
 }
@@ -216,6 +217,15 @@ func (s *Sharer) cleanupHandshake(relayViewerID string) {
 		delete(s.handshakes, relayViewerID)
 	}
 	s.mu.Unlock()
+}
+
+func (s *Sharer) destroyPendingHandshakes() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, hs := range s.handshakes {
+		hs.spake.Destroy()
+		delete(s.handshakes, id)
+	}
 }
 
 func (s *Sharer) sendUnicast(ctx context.Context, viewerID string, payload []byte) error {
