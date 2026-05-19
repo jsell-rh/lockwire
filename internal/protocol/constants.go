@@ -49,6 +49,9 @@ const (
 	IPCCommandList   = "list"
 	IPCCommandRevoke = "revoke"
 
+	// Viewer revocation detection.
+	ViewerRevocationFailureThreshold = 10
+
 	// Relay limits.
 	DefaultMaxViewers       = 20
 	ViewerBufferLimitBytes  = 512 * 1024 // 512 KB outbound buffer before disconnect

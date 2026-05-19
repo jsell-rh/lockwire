@@ -17,6 +17,10 @@ func (p *stdoutViewerProbe) HandshakeCompleted(viewerID string) {
 
 func (p *stdoutViewerProbe) FrameDecrypted(uint64, int) {}
 
+func (p *stdoutViewerProbe) StreamKeyRotated() {}
+
+func (p *stdoutViewerProbe) AccessRevoked() {}
+
 func (p *stdoutViewerProbe) SessionEnded(string) {}
 
 func (p *stdoutViewerProbe) HandshakeFailed(error) {}

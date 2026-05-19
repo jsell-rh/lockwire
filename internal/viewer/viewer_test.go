@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -107,28 +108,38 @@ func (f *fakeRelay) getSent() [][]byte {
 // --- Recording probe ---
 
 type recordingProbe struct {
-	mu         sync.Mutex
-	connecting bool
-	completed  string
-	frames     []int
-	ended      string
-	hsFailed   error
-	heartbeats int
+	mu             sync.Mutex
+	connecting     bool
+	completed      string
+	frames         []int
+	ended          string
+	hsFailed       error
+	heartbeats     int
+	keyRotations   int
+	accessRevoked  bool
 }
 
 func (p *recordingProbe) Connecting()                    { p.mu.Lock(); p.connecting = true; p.mu.Unlock() }
 func (p *recordingProbe) HandshakeCompleted(id string)   { p.mu.Lock(); p.completed = id; p.mu.Unlock() }
 func (p *recordingProbe) FrameDecrypted(_ uint64, n int) { p.mu.Lock(); p.frames = append(p.frames, n); p.mu.Unlock() }
+func (p *recordingProbe) StreamKeyRotated()              { p.mu.Lock(); p.keyRotations++; p.mu.Unlock() }
+func (p *recordingProbe) AccessRevoked()                 { p.mu.Lock(); p.accessRevoked = true; p.mu.Unlock() }
 func (p *recordingProbe) SessionEnded(reason string)     { p.mu.Lock(); p.ended = reason; p.mu.Unlock() }
 func (p *recordingProbe) HandshakeFailed(err error)      { p.mu.Lock(); p.hsFailed = err; p.mu.Unlock() }
 func (p *recordingProbe) HeartbeatSent()                 { p.mu.Lock(); p.heartbeats++; p.mu.Unlock() }
 
 // --- Sharer-side handshake helper ---
 
+type handshakeResult struct {
+	viewerID string
+	authKey  []byte
+}
+
 // simulateSharerHandshake runs the sharer side of the SPAKE2 handshake
 // against the viewer's messages on the fake relay. It registers the viewer
-// on the session and delivers the stream key.
-func simulateSharerHandshake(t *testing.T, relay *fakeRelay, sess *session.Session, code []byte) {
+// on the session and delivers the stream key. Returns the viewer's auth key
+// so callers can build K' delivery messages for revocation tests.
+func simulateSharerHandshake(t *testing.T, relay *fakeRelay, sess *session.Session, code []byte) handshakeResult {
 	t.Helper()
 
 	// Send join ack
@@ -189,7 +200,6 @@ func simulateSharerHandshake(t *testing.T, relay *fakeRelay, sess *session.Sessi
 	if err != nil {
 		t.Fatalf("deriving auth key: %v", err)
 	}
-	defer crypto.ZeroBytes(authKey)
 
 	info, encPayload, err := sess.RegisterViewer(authKey, protocol.ClientTypeCLI)
 	if err != nil {
@@ -203,6 +213,12 @@ func simulateSharerHandshake(t *testing.T, relay *fakeRelay, sess *session.Sessi
 	copy(delivery[protocol.ViewerIDLen+protocol.NonceLen:], encPayload.Ciphertext)
 
 	relay.incoming <- delivery
+
+	// Return a copy of the auth key — caller owns it and must zero it.
+	authKeyCopy := make([]byte, len(authKey))
+	copy(authKeyCopy, authKey)
+
+	return handshakeResult{viewerID: info.ID, authKey: authKeyCopy}
 }
 
 func waitForSent(t *testing.T, relay *fakeRelay, count int) {
@@ -472,7 +488,570 @@ func TestKeyMaterialZeroedOnStop(t *testing.T) {
 	}
 }
 
+// --- K' Rotation Tests ---
+
+func TestStreamKeyRotation(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Stream a frame under original K
+	ct, nonce, epoch, err := sess.EncryptFrame([]byte("before rotation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct, nonce, epoch)
+	waitForOutput(t, output)
+
+	if got := output.String(); got != "before rotation" {
+		t.Fatalf("output = %q, want %q", got, "before rotation")
+	}
+	output.Reset()
+
+	// Simulate K' rotation: generate new stream key, encrypt it with viewer's auth key
+	kPrime, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(kPrime)
+
+	rekeyNonce := sess.NextNonce()
+	ct, err = crypto.Seal(hs.authKey, rekeyNonce, kPrime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+	copy(rekeyMsg[:protocol.ViewerIDLen], hs.viewerID)
+	copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+	copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+	relay.incoming <- rekeyMsg
+
+	// Wait for the probe to record the rotation
+	waitForKeyRotation(t, probe)
+
+	// Stream a frame under K'
+	epochK := uint64(time.Now().Unix()) / protocol.EpochDurationSec
+	epochKey, err := crypto.DeriveEpochKey(kPrime, epochK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+
+	frameNonce := sess.NextNonce()
+	ct, err = crypto.Seal(epochKey, frameNonce, []byte("after rotation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	relay.incoming <- buildStreamFrame(ct, frameNonce, epochK)
+	waitForOutput(t, output)
+
+	if got := output.String(); got != "after rotation" {
+		t.Fatalf("output after rotation = %q, want %q", got, "after rotation")
+	}
+
+	probe.mu.Lock()
+	if probe.keyRotations != 1 {
+		t.Errorf("keyRotations = %d, want 1", probe.keyRotations)
+	}
+	probe.mu.Unlock()
+
+	cancel()
+	<-errCh
+}
+
+func TestStreamKeyRotationNonceDoesNotReset(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Stream a frame under original K — this advances the nonce
+	ct, nonce, epoch, err := sess.EncryptFrame([]byte("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct, nonce, epoch)
+	waitForOutput(t, output)
+	output.Reset()
+
+	// Deliver K'
+	kPrime, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(kPrime)
+
+	rekeyNonce := sess.NextNonce()
+	ct, err = crypto.Seal(hs.authKey, rekeyNonce, kPrime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+	copy(rekeyMsg[:protocol.ViewerIDLen], hs.viewerID)
+	copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+	copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+	relay.incoming <- rekeyMsg
+	waitForKeyRotation(t, probe)
+
+	// Build a frame under K' with a LOW nonce (nonce=1) — should be rejected
+	epochK := uint64(time.Now().Unix()) / protocol.EpochDurationSec
+	epochKey, err := crypto.DeriveEpochKey(kPrime, epochK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+
+	lowNonce := make([]byte, protocol.NonceLen)
+	binary.BigEndian.PutUint64(lowNonce[4:], 1)
+	ct, err = crypto.Seal(epochKey, lowNonce, []byte("replayed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct, lowNonce, epochK)
+
+	// Send a valid frame with a proper high nonce to prove the viewer is alive
+	validNonce := sess.NextNonce()
+	ct, err = crypto.Seal(epochKey, validNonce, []byte("valid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct, validNonce, epochK)
+	waitForOutput(t, output)
+
+	if got := output.String(); got != "valid" {
+		t.Fatalf("output = %q, want %q (replayed frame should be discarded)", got, "valid")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestRevokedViewerDetectsSustainedDecryptionFailure(t *testing.T) {
+	relay := newFakeRelay()
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, &safeBuffer{}, probe)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- v.Run(context.Background())
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Send frames encrypted under a key the viewer doesn't have (simulating K' rotation
+	// where this viewer was revoked and never received K')
+	unknownKey, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(unknownKey)
+
+	epochK := uint64(time.Now().Unix()) / protocol.EpochDurationSec
+	epochKey, err := crypto.DeriveEpochKey(unknownKey, epochK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+
+	// Send enough undecryptable frames to trigger the revocation detection threshold
+	for i := 0; i < protocol.ViewerRevocationFailureThreshold+1; i++ {
+		nonce := make([]byte, protocol.NonceLen)
+		binary.BigEndian.PutUint64(nonce[4:], uint64(100+i))
+		ct, err := crypto.Seal(epochKey, nonce, []byte("secret"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		relay.incoming <- buildStreamFrame(ct, nonce, epochK)
+	}
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrAccessRevoked) {
+			t.Errorf("expected ErrAccessRevoked, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("viewer did not exit on sustained decryption failure")
+	}
+
+	probe.mu.Lock()
+	if !probe.accessRevoked {
+		t.Error("AccessRevoked probe not called")
+	}
+	probe.mu.Unlock()
+}
+
+func TestOldStreamKeyZeroedAfterRotation(t *testing.T) {
+	relay := newFakeRelay()
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, &safeBuffer{}, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Capture a reference to the old key bytes
+	oldKey := v.streamKey
+
+	// Deliver K'
+	kPrime, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(kPrime)
+
+	rekeyNonce := sess.NextNonce()
+	ct, err := crypto.Seal(hs.authKey, rekeyNonce, kPrime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+	copy(rekeyMsg[:protocol.ViewerIDLen], hs.viewerID)
+	copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+	copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+	relay.incoming <- rekeyMsg
+	waitForKeyRotation(t, probe)
+
+	// The old key bytes should now be zeroed
+	for _, b := range oldKey {
+		if b != 0 {
+			t.Fatal("old stream key not zeroed after K' rotation")
+		}
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestStreamKeyRotationWrongViewerID(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Send K' with a wrong viewer ID — should be silently rejected
+	kPrime, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(kPrime)
+
+	rekeyNonce := sess.NextNonce()
+	ct, err := crypto.Seal(hs.authKey, rekeyNonce, kPrime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+	copy(rekeyMsg[:protocol.ViewerIDLen], "zzzzzz")
+	copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+	copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+	relay.incoming <- rekeyMsg
+
+	// Verify viewer is still alive by streaming a valid frame under original K
+	ct2, nonce2, epoch2, err := sess.EncryptFrame([]byte("still alive"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct2, nonce2, epoch2)
+	waitForOutput(t, output)
+
+	if got := output.String(); got != "still alive" {
+		t.Fatalf("output = %q, want %q", got, "still alive")
+	}
+
+	probe.mu.Lock()
+	if probe.keyRotations != 0 {
+		t.Errorf("keyRotations = %d, want 0 (wrong viewer ID should be rejected)", probe.keyRotations)
+	}
+	probe.mu.Unlock()
+
+	cancel()
+	<-errCh
+}
+
+func TestStreamKeyRotationTamperedCiphertext(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	// Send K' with tampered ciphertext — should be rejected, viewer continues with old K
+	kPrime, err := crypto.GenerateStreamKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(kPrime)
+
+	rekeyNonce := sess.NextNonce()
+	ct, err := crypto.Seal(hs.authKey, rekeyNonce, kPrime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct[len(ct)-1] ^= 0xff // flip a bit
+
+	rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+	copy(rekeyMsg[:protocol.ViewerIDLen], hs.viewerID)
+	copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+	copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+	relay.incoming <- rekeyMsg
+
+	// Viewer should still work under the original K
+	ct2, nonce2, epoch2, err := sess.EncryptFrame([]byte("still working"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	relay.incoming <- buildStreamFrame(ct2, nonce2, epoch2)
+	waitForOutput(t, output)
+
+	if got := output.String(); got != "still working" {
+		t.Fatalf("output = %q, want %q", got, "still working")
+	}
+
+	probe.mu.Lock()
+	if probe.keyRotations != 0 {
+		t.Errorf("keyRotations = %d, want 0 (tampered K' should be rejected)", probe.keyRotations)
+	}
+	probe.mu.Unlock()
+
+	cancel()
+	<-errCh
+}
+
+func TestMultipleSequentialKeyRotations(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	hs := simulateSharerHandshake(t, relay, sess, testCode)
+	defer crypto.ZeroBytes(hs.authKey)
+	waitForProbe(t, probe)
+
+	currentKey := make([]byte, protocol.KeyLen)
+	// We don't have direct access to the original stream key from outside,
+	// so we verify each rotation by streaming frames under the new key.
+
+	for rotation := 1; rotation <= 3; rotation++ {
+		kNew, err := crypto.GenerateStreamKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rekeyNonce := sess.NextNonce()
+		ct, err := crypto.Seal(hs.authKey, rekeyNonce, kNew)
+		if err != nil {
+			crypto.ZeroBytes(kNew)
+			t.Fatal(err)
+		}
+
+		rekeyMsg := make([]byte, protocol.ViewerIDLen+protocol.NonceLen+len(ct))
+		copy(rekeyMsg[:protocol.ViewerIDLen], hs.viewerID)
+		copy(rekeyMsg[protocol.ViewerIDLen:protocol.ViewerIDLen+protocol.NonceLen], rekeyNonce)
+		copy(rekeyMsg[protocol.ViewerIDLen+protocol.NonceLen:], ct)
+
+		relay.incoming <- rekeyMsg
+
+		// Wait for rotation to be processed
+		deadline := time.After(5 * time.Second)
+		for {
+			probe.mu.Lock()
+			done := probe.keyRotations >= rotation
+			probe.mu.Unlock()
+			if done {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatalf("rotation %d not processed", rotation)
+			default:
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+
+		// Stream a frame under the new key
+		output.Reset()
+		epochK := uint64(time.Now().Unix()) / protocol.EpochDurationSec
+		epochKey, err := crypto.DeriveEpochKey(kNew, epochK)
+		if err != nil {
+			crypto.ZeroBytes(kNew)
+			t.Fatal(err)
+		}
+
+		frameNonce := sess.NextNonce()
+		ct, err = crypto.Seal(epochKey, frameNonce, []byte(fmt.Sprintf("rotation-%d", rotation)))
+		crypto.ZeroBytes(epochKey)
+		if err != nil {
+			crypto.ZeroBytes(kNew)
+			t.Fatal(err)
+		}
+
+		relay.incoming <- buildStreamFrame(ct, frameNonce, epochK)
+		waitForOutput(t, output)
+
+		want := fmt.Sprintf("rotation-%d", rotation)
+		if got := output.String(); got != want {
+			t.Fatalf("rotation %d: output = %q, want %q", rotation, got, want)
+		}
+
+		copy(currentKey, kNew)
+		crypto.ZeroBytes(kNew)
+	}
+
+	probe.mu.Lock()
+	if probe.keyRotations != 3 {
+		t.Errorf("keyRotations = %d, want 3", probe.keyRotations)
+	}
+	probe.mu.Unlock()
+
+	cancel()
+	<-errCh
+}
+
 // --- Helpers ---
+
+func waitForKeyRotation(t *testing.T, probe *recordingProbe) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		probe.mu.Lock()
+		done := probe.keyRotations > 0
+		probe.mu.Unlock()
+		if done {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("K' rotation not processed")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
 
 func waitForProbe(t *testing.T, probe *recordingProbe) {
 	t.Helper()

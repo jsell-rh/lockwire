@@ -187,6 +187,10 @@ func (s *Session) RemoveViewer(viewerID string) {
 	}
 }
 
+func (s *Session) NextNonce() []byte {
+	return s.nonce.Next()
+}
+
 func (s *Session) CurrentEpoch() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

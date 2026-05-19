@@ -18,6 +18,7 @@ var (
 	ErrHandshakeTimeout = errors.New("handshake timed out")
 	ErrSessionEnded     = errors.New("session ended by sharer")
 	ErrConnectionLost   = errors.New("session lost (connection dropped)")
+	ErrAccessRevoked    = errors.New("access revoked")
 )
 
 type RelayConn interface {
@@ -27,15 +28,17 @@ type RelayConn interface {
 }
 
 type Viewer struct {
-	relay     RelayConn
-	code      []byte
-	output    io.Writer
-	probe     Probe
-	streamKey []byte
-	viewerID  string
-	lastNonce uint64
-	done      chan struct{}
-	cancel    context.CancelFunc
+	relay              RelayConn
+	code               []byte
+	output             io.Writer
+	probe              Probe
+	streamKey          []byte
+	authKey            []byte
+	viewerID           string
+	lastNonce          uint64
+	consecutiveFailures int
+	done               chan struct{}
+	cancel             context.CancelFunc
 }
 
 func New(relay RelayConn, code []byte, output io.Writer, probe Probe) *Viewer {
@@ -228,14 +231,15 @@ func (v *Viewer) processKeyDelivery(spake *crypto.SPAKEHandshake, delivery []byt
 	if err != nil {
 		return fmt.Errorf("deriving auth key: %w", err)
 	}
-	defer crypto.ZeroBytes(authKey)
 
 	k, err := crypto.Open(authKey, nonce, ciphertext)
 	if err != nil {
+		crypto.ZeroBytes(authKey)
 		return fmt.Errorf("decrypting stream key: %w", err)
 	}
 
 	v.streamKey = k
+	v.authKey = authKey
 	return nil
 }
 
@@ -255,8 +259,14 @@ func (v *Viewer) streamLoop(ctx context.Context) error {
 		switch data[0] {
 		case protocol.MsgTypeStream:
 			if err := v.decryptAndWrite(data); err != nil {
+				v.consecutiveFailures++
+				if v.consecutiveFailures >= protocol.ViewerRevocationFailureThreshold {
+					v.probe.AccessRevoked()
+					return ErrAccessRevoked
+				}
 				continue
 			}
+			v.consecutiveFailures = 0
 		case protocol.MsgTypeControl:
 			if len(data) >= 2 && data[1] == protocol.CtrlSessionEnded {
 				v.probe.SessionEnded("sharer disconnected")
@@ -265,10 +275,37 @@ func (v *Viewer) streamLoop(ctx context.Context) error {
 		case protocol.MsgTypePong:
 			continue
 		default:
-			// Unicast (no type prefix) — could be K' rotation
-			continue
+			if err := v.processRekey(data); err != nil {
+				continue
+			}
 		}
 	}
+}
+
+func (v *Viewer) processRekey(data []byte) error {
+	minLen := protocol.ViewerIDLen + protocol.NonceLen + protocol.GCMTagLen + 1
+	if len(data) < minLen {
+		return fmt.Errorf("rekey message too short: %d bytes", len(data))
+	}
+
+	id := string(data[:protocol.ViewerIDLen])
+	if id != v.viewerID {
+		return fmt.Errorf("rekey viewer ID mismatch: %s != %s", id, v.viewerID)
+	}
+
+	nonce := data[protocol.ViewerIDLen : protocol.ViewerIDLen+protocol.NonceLen]
+	ciphertext := data[protocol.ViewerIDLen+protocol.NonceLen:]
+
+	kPrime, err := crypto.Open(v.authKey, nonce, ciphertext)
+	if err != nil {
+		return fmt.Errorf("decrypting K': %w", err)
+	}
+
+	crypto.ZeroBytes(v.streamKey)
+	v.streamKey = kPrime
+	v.consecutiveFailures = 0
+	v.probe.StreamKeyRotated()
+	return nil
 }
 
 func (v *Viewer) decryptAndWrite(frame []byte) error {
@@ -328,5 +365,8 @@ func (v *Viewer) heartbeatLoop(ctx context.Context) {
 func (v *Viewer) zeroKeys() {
 	if v.streamKey != nil {
 		crypto.ZeroBytes(v.streamKey)
+	}
+	if v.authKey != nil {
+		crypto.ZeroBytes(v.authKey)
 	}
 }
