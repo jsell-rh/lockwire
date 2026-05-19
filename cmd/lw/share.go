@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jsell-rh/lockwire/internal/code"
+	"github.com/jsell-rh/lockwire/internal/ipc"
 	"github.com/jsell-rh/lockwire/internal/session"
 	"github.com/jsell-rh/lockwire/internal/sharer"
 	lwpty "github.com/jsell-rh/lockwire/internal/pty"
@@ -83,6 +84,15 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 
 	probe := &stdoutSharerProbe{out: cmd.ErrOrStderr()}
 	sh := sharer.New(sess, relay, []byte(pairingCode), probe)
+
+	sockPath := ipc.SocketPath(os.Getpid())
+	adapter := &ipcSessionAdapter{sess: sess, revoke: sh.Revoke}
+	ipcSrv, err := ipc.NewServer(sockPath, adapter, nil)
+	if err != nil {
+		return fmt.Errorf("starting control socket: %w", err)
+	}
+	defer ipcSrv.Close()
+	go ipcSrv.Serve()
 
 	// Handle SIGWINCH for terminal resize.
 	sigwinch := make(chan os.Signal, 1)

@@ -436,3 +436,107 @@ func TestKeyDeliveryFormat(t *testing.T) {
 		t.Error("ciphertext mismatch")
 	}
 }
+
+func TestSharerRevokeRemovesViewerAndSendsRekey(t *testing.T) {
+	sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer sess.Close()
+
+	relay := newFakeRelay()
+	probe := &recordingProbe{}
+	sh := New(sess, relay, []byte("code"), probe)
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sh.Run(ctx, pr)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	authKeyA := make([]byte, protocol.KeyLen)
+	authKeyA[0] = 0x01
+	infoA, _, err := sess.RegisterViewer(authKeyA, protocol.ClientTypeCLI)
+	if err != nil {
+		t.Fatalf("RegisterViewer A: %v", err)
+	}
+
+	authKeyB := make([]byte, protocol.KeyLen)
+	authKeyB[0] = 0x02
+	_, _, err = sess.RegisterViewer(authKeyB, protocol.ClientTypeBrowser)
+	if err != nil {
+		t.Fatalf("RegisterViewer B: %v", err)
+	}
+
+	if err := sh.Revoke(ctx, infoA.ID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	viewers := sess.ListViewers()
+	if len(viewers) != 1 {
+		t.Fatalf("expected 1 viewer after revoke, got %d", len(viewers))
+	}
+
+	// Verify rekey unicast was sent to the remaining viewer.
+	msgs := relay.sentMessages()
+	var rekeyFound bool
+	for _, m := range msgs {
+		if len(m) > 0 && m[0] == protocol.MsgTypeUnicast {
+			vid, _ := extractUnicastPayload(m)
+			if vid != padViewerID(infoA.ID) {
+				rekeyFound = true
+			}
+		}
+	}
+	if !rekeyFound {
+		t.Error("expected a rekey unicast to the remaining viewer")
+	}
+
+	probe.mu.Lock()
+	if len(probe.viewersLeft) != 1 || probe.viewersLeft[0] != infoA.ID {
+		t.Errorf("expected ViewerLeft for %s, got %v", infoA.ID, probe.viewersLeft)
+	}
+	probe.mu.Unlock()
+
+	pw.Close()
+	cancel()
+	<-done
+}
+
+func TestSharerRevokeUnknownViewerReturnsError(t *testing.T) {
+	sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer sess.Close()
+
+	relay := newFakeRelay()
+	sh := New(sess, relay, []byte("code"), nil)
+
+	pr, pw := io.Pipe()
+	defer pr.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sh.Run(ctx, pr)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	err = sh.Revoke(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown viewer")
+	}
+
+	pw.Close()
+	cancel()
+	<-done
+}

@@ -98,6 +98,23 @@ func (s *Sharer) Stop() {
 	<-s.done
 }
 
+func (s *Sharer) Revoke(ctx context.Context, viewerID string) error {
+	rekeys, err := s.sess.RevokeViewer(viewerID)
+	if err != nil {
+		return err
+	}
+
+	for id, enc := range rekeys {
+		delivery := buildKeyDelivery(id, enc)
+		if err := s.sendUnicast(ctx, id, delivery); err != nil {
+			return fmt.Errorf("delivering rekey to %s: %w", id, err)
+		}
+	}
+
+	s.probe.ViewerLeft(viewerID)
+	return nil
+}
+
 func (s *Sharer) relayLoop(ctx context.Context) error {
 	for {
 		data, err := s.relay.Recv(ctx)
