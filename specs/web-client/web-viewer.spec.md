@@ -2,13 +2,13 @@
 
 ## Purpose
 
-The Lockwire web viewer allows a Viewer to watch a shared session in any modern browser without installing the `lw` binary. The web viewer is served by the relay at `https://<relay-host>/join#<code>` and performs all cryptographic operations (SPAKE2, AES-256-GCM) natively in the browser using the WebCrypto API. Terminal output is rendered in an xterm.js instance. The web viewer is read-only and cryptographically equivalent to the CLI Viewer.
+The Lockwire web viewer allows a Viewer to watch a shared session in any modern browser without installing the `lw` binary. The web viewer is served by the relay at `https://<relay-host>/join#<code>` and performs all cryptographic operations in the browser: Argon2id for Session ID derivation (via an embedded WASM module), SPAKE2 for authentication, and AES-256-GCM for stream decryption (via the native WebCrypto API). Terminal output is rendered in an xterm.js instance. The web viewer is read-only and cryptographically equivalent to the CLI Viewer.
 
 ## Requirements
 
 ### Requirement: No Installation Required
 
-The web viewer SHALL function in any modern browser (Chrome ≥ 111, Firefox ≥ 113, Safari ≥ 16.4) without plugins, extensions, or WASM downloads. All cryptographic primitives SHALL be sourced from the browser's native WebCrypto API.
+The web viewer SHALL function in any modern browser (Chrome ≥ 111, Firefox ≥ 113, Safari ≥ 16.4) without plugins or extensions. Stream encryption (AES-256-GCM) and key derivation (HKDF-SHA256) SHALL use the browser's native WebCrypto API. Session ID derivation (Argon2id) SHALL use an embedded WASM module bundled with the web viewer, as Argon2id is not available in WebCrypto. The WASM module SHALL be served from the relay alongside the viewer application (no external download).
 
 #### Scenario: First-time browser viewer
 - GIVEN a user receives the link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`

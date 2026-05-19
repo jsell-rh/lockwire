@@ -44,7 +44,7 @@ The relay SHALL accept a session registration from a Sharer presenting a Session
 
 ### Requirement: Viewer Connection
 
-The relay SHALL allow Viewers to connect to an active session by presenting a Session ID. The relay does not authenticate Viewers — authentication is the Sharer's responsibility via SPAKE2.
+The relay SHALL allow Viewers to connect to an active session by presenting a Session ID. Both the Sharer and the Viewer derive the Session ID independently from the Code via Argon2id before connecting to the relay; no prior exchange is needed to agree on the Session ID. The relay does not authenticate Viewers — authentication is the Sharer's responsibility via SPAKE2.
 
 The relay SHALL assign each connected Viewer a relay-level connection handle used for unicast routing. This is distinct from the Viewer ID assigned by the Sharer.
 
@@ -179,7 +179,7 @@ The relay SHALL be architecturally incapable of reading session content. This is
 #### Scenario: Relay operator captures all traffic
 - GIVEN a relay operator records all WebSocket frames
 - WHEN they attempt to reconstruct session content
-- THEN they observe only: Session IDs (derived tokens), SPAKE2 handshake blobs (opaque without the Code), AES-256-GCM ciphertext frames (opaque without the Stream Key)
+- THEN they observe only: Session IDs (derived from the Code via Argon2id — brute-force recovery of the Code is computationally infeasible), SPAKE2 handshake blobs (opaque without the Code), AES-256-GCM ciphertext frames (opaque without the Stream Key)
 
 ---
 

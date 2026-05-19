@@ -12,9 +12,9 @@ Lockwire's cryptographic model enforces a strict separation between authenticati
 
 ### Requirement: Code Is Never Transmitted
 
-The Code SHALL NOT appear in any message sent to the relay or to any peer. It is consumed exclusively as the SPAKE2 password in the local handshake computation.
+The Code SHALL NOT appear in any message sent to the relay or to any peer. It is consumed locally for two purposes: (1) as the SPAKE2 password in the handshake computation, and (2) as the input to Session ID derivation via Argon2id. In neither case is the Code transmitted.
 
-**Code entropy:** The Code is six words drawn uniformly at random from the BIP39 English wordlist (2048 words). This provides log₂(2048⁶) = 66 bits of entropy. SPAKE2 provides online-only brute-force resistance: each guess requires a live round-trip with the Sharer. The relay SHALL rate-limit connection attempts to a maximum of 10 failed handshakes per Session ID per minute.
+**Code entropy:** The Code is six words drawn uniformly at random from the BIP39 English wordlist (2048 words). This provides log₂(2048⁶) = 66 bits of entropy. SPAKE2 provides online-only brute-force resistance: each guess requires a live round-trip with the Sharer. The relay SHALL rate-limit connection attempts to a maximum of 10 failed handshakes per Session ID per minute. The Code is also used to derive the Session ID via Argon2id (see Requirement: Session ID Derivation). The memory-hard Argon2id parameters ensure that offline brute-force of the Code from a captured Session ID is computationally infeasible.
 
 #### Scenario: Passive observer sees no Code
 - GIVEN a Viewer runs `lw join <code>`
@@ -38,13 +38,47 @@ The Stream Key (K) SHALL be a cryptographically random 256-bit value generated f
 
 ### Requirement: Session ID Derivation
 
-The relay-facing Session ID SHALL be derived as `HMAC-SHA256(K, "lw-session-id")`, truncated to 16 bytes and hex-encoded (32 characters). The relay SHALL NOT be able to determine K or the Code from the Session ID alone.
+The relay-facing Session ID SHALL be derived from the Code (not the Stream Key) using Argon2id, enabling both the Sharer and the Viewer to compute it independently before contacting the relay.
+
+**Derivation formula:**
+
+```
+Argon2id(password=code_bytes, salt="lockwire-session-id-v1", m=65536, t=1, p=1, len=16) → hex
+```
+
+**Parameters (RFC 9106):**
+- Variant: Argon2id (hybrid side-channel + GPU resistance)
+- Memory (m): 64 MiB (65536 KiB)
+- Iterations (t): 1
+- Parallelism (p): 1
+- Salt: the ASCII bytes of `"lockwire-session-id-v1"` (fixed domain separator; both parties must derive the same output; the `v1` suffix allows future parameter changes without ambiguity)
+- Output length: 16 bytes (hex-encoded to 32 characters)
+
+`code_bytes` is the Code in canonical form (lowercase, hyphen-separated, e.g. `thunder-eagle-river-moon-stone-fire`), encoded as UTF-8.
+
+**Security rationale:** The Code has 66 bits of entropy (2048⁶ BIP39 words). Argon2id with 64 MiB memory makes each evaluation take approximately 50–100 ms on modern hardware. Brute-forcing the Session ID to recover the Code requires approximately 2⁶⁶ evaluations, which is computationally infeasible. The relay cannot determine the Code from the Session ID.
+
+**Session ID stability:** Because the Session ID is derived from the Code (not from K), it does not change when the Stream Key is rotated during viewer revocation. The relay routing is stable across key rotations.
 
 #### Scenario: Relay knows only the Session ID
 - GIVEN a session is active
 - WHEN the relay's internal state is fully inspected
 - THEN the relay holds only the Session ID, not K and not the Code
+- AND the Session ID cannot be used to determine the Code (Argon2id is a memory-hard one-way function)
 - AND all blobs stored or forwarded by the relay are opaque ciphertext
+
+#### Scenario: Sharer and Viewer derive the same Session ID independently
+- GIVEN a Sharer runs `lw share` and obtains Code C
+- AND a Viewer runs `lw join C`
+- WHEN both compute `Argon2id(C, "lockwire-session-id-v1", m=65536, t=1, p=1, len=16)`
+- THEN both produce the identical Session ID
+- AND both connect to the relay using that Session ID before the SPAKE2 handshake begins
+
+#### Scenario: Session ID is stable across Stream Key rotation
+- GIVEN a session is active with Code C and Stream Key K
+- WHEN a Viewer is revoked and the Stream Key rotates to K'
+- THEN the Session ID does not change (it is derived from C, not K or K')
+- AND the relay continues routing messages under the same Session ID
 
 ---
 
@@ -137,7 +171,7 @@ Viewers who possess K derive K_n independently and identically without any addit
 
 ### Requirement: Stream Key Rotation for Viewer Revocation
 
-When the Sharer revokes a Viewer, the system SHALL generate a new Stream Key K' (fresh random 256-bit value) and deliver it to all non-revoked Viewers using their retained per-viewer SPAKE2 session key (K_auth_i). New frames SHALL be encrypted under epochs derived from K'. The epoch counter resets to the current epoch number; the nonce counter does NOT reset.
+When the Sharer revokes a Viewer, the system SHALL generate a new Stream Key K' (fresh random 256-bit value) and deliver it to all non-revoked Viewers using their retained per-viewer SPAKE2 session key (K_auth_i). New frames SHALL be encrypted under epochs derived from K'. The epoch counter resets to the current epoch number; the nonce counter does NOT reset. The Session ID does not change during Stream Key rotation; it is derived from the Code, which remains constant for the session's lifetime.
 
 #### Scenario: K' delivered to non-revoked Viewers
 - GIVEN Viewer A is revoked and Viewer B is not

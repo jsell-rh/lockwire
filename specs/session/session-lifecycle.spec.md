@@ -31,7 +31,7 @@ The system SHALL create a new Session when the Sharer runs `lw share`, connectin
 - GIVEN a Session is registered on the relay
 - WHEN the relay's session table is inspected
 - THEN the Code does not appear in any field
-- AND the Session ID is `HMAC-SHA256(K, "lw-session-id")[:16]` in hex
+- AND the Session ID is `Argon2id(code_bytes, salt="lockwire-session-id-v1", m=65536, t=1, p=1, len=16)` hex-encoded
 
 ---
 

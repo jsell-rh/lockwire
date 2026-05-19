@@ -100,7 +100,7 @@ These must never be violated — no exceptions, no shortcuts:
 - **The relay is blind.** Relay code (`internal/relay`) must not import `internal/crypto` or touch any type that carries key material. If a reviewer sees key material flowing into the relay package, that is a bug.
 - **AES-256-GCM, not ChaCha20.** This was an explicit decision for WebCrypto API compatibility. Do not switch ciphers without updating the spec and AGENTS.md.
 - **HKDF info strings must match the spec exactly.** Use the constants in `internal/protocol`:
-  - Session ID: `HMAC-SHA256(K, "lw-session-id")`
+  - Session ID: `Argon2id(code_bytes, salt="lockwire-session-id-v1", m=65536, t=1, p=1, len=16)` hex-encoded
   - Epoch key: `HKDF-SHA256(K, info="lw-epoch-{n}")`
   - SPAKE2 associated data: `"lockwire-v1"`
 - **Forward secrecy scope.** Lockwire provides inter-session FS (fresh K per session). Within a session, K is the master secret: all epoch keys are derivable from K. This is intentional (simpler architecture, Viewers derive epoch keys independently). Do not implement a ratchet without a spec change.
