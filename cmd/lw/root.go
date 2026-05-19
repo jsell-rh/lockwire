@@ -12,9 +12,10 @@ const defaultRelayURL = "wss://relay.lockwire.io"
 
 func newRootCmd(ver string) *cobra.Command {
 	root := &cobra.Command{
-		Use:   "lw",
-		Short: "E2E-encrypted terminal sharing",
-		Version: ver,
+		Use:           "lw",
+		Short:         "E2E-encrypted terminal sharing",
+		Version:       ver,
+		SilenceErrors: true,
 	}
 
 	root.SetVersionTemplate("lw {{.Version}}\n")

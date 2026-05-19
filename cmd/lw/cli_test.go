@@ -88,3 +88,61 @@ func TestShareRelayInsecureAllowsWS(t *testing.T) {
 		t.Errorf("insecure mode should allow ws://, got: %v", err)
 	}
 }
+
+func TestBuildWatchURL(t *testing.T) {
+	tests := []struct {
+		relay string
+		code  string
+		want  string
+	}{
+		{
+			relay: "wss://relay.lockwire.io",
+			code:  "thunder-eagle-river-moon-stone-fire",
+			want:  "https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire",
+		},
+		{
+			relay: "wss://relay.example.com/lockwire",
+			code:  "test-code",
+			want:  "https://relay.example.com/lockwire/join#test-code",
+		},
+		{
+			relay: "ws://localhost:8080",
+			code:  "test-code",
+			want:  "http://localhost:8080/join#test-code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.relay, func(t *testing.T) {
+			got := buildWatchURL(tt.relay, tt.code)
+			if got != tt.want {
+				t.Errorf("buildWatchURL(%q, %q) = %q, want %q", tt.relay, tt.code, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPIDFileWriteAndRemove(t *testing.T) {
+	// Clean up any existing PID file from previous runs.
+	removePIDFile()
+
+	if err := checkExistingSession(); err != nil {
+		t.Fatalf("unexpected error with no PID file: %v", err)
+	}
+
+	if err := writePIDFile(); err != nil {
+		t.Fatalf("writePIDFile: %v", err)
+	}
+
+	// Our own PID should be detected as active.
+	err := checkExistingSession()
+	if err == nil {
+		t.Fatal("expected error for existing session")
+	}
+
+	removePIDFile()
+
+	if err := checkExistingSession(); err != nil {
+		t.Fatalf("after removal, unexpected error: %v", err)
+	}
+}

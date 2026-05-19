@@ -9,7 +9,7 @@ var version = "dev"
 
 func main() {
 	if err := newRootCmd(version).Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
 }
