@@ -3,25 +3,31 @@ package relay
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"sync"
+	"time"
 
-	"github.com/jsell-rh/lockwire/internal/protocol"
 	"github.com/coder/websocket"
+	"github.com/jsell-rh/lockwire/internal/protocol"
 )
+
+const viewerSendBufSize = 64
 
 type viewerConn struct {
 	id   string
 	conn *websocket.Conn
+	send chan []byte
 }
 
 type session struct {
 	mu      sync.Mutex
 	sharer  *websocket.Conn
 	viewers map[string]*viewerConn
-	done    chan struct{}
+	closed  bool
 }
 
 type Server struct {
@@ -46,8 +52,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+func validSessionID(id string) bool {
+	if len(id) != protocol.SessionIDLen*2 {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
 func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionID")
+	if !validSessionID(sessionID) {
+		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		return
+	}
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -66,7 +84,6 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 	sess := &session{
 		sharer:  conn,
 		viewers: make(map[string]*viewerConn),
-		done:    make(chan struct{}),
 	}
 	s.sessions[sessionID] = sess
 	s.mu.Unlock()
@@ -78,6 +95,10 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionID")
+	if !validSessionID(sessionID) {
+		http.Error(w, "invalid session ID", http.StatusBadRequest)
+		return
+	}
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -96,6 +117,13 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess.mu.Lock()
+	if sess.closed {
+		sess.mu.Unlock()
+		sendControl(r.Context(), conn, protocol.CtrlSessionNotFound, nil)
+		conn.Close(websocket.StatusPolicyViolation, "session-not-found")
+		return
+	}
+
 	if len(sess.viewers) >= s.maxViewers {
 		sess.mu.Unlock()
 		sendControl(r.Context(), conn, protocol.CtrlSessionFull, nil)
@@ -110,33 +138,51 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vc := &viewerConn{id: id, conn: conn}
+	vc := &viewerConn{id: id, conn: conn, send: make(chan []byte, viewerSendBufSize)}
 	sess.viewers[id] = vc
 	sess.mu.Unlock()
 
 	sendControl(r.Context(), conn, protocol.CtrlJoinAck, []byte(id))
 
+	go s.viewerWriter(vc)
 	s.runViewer(sess, vc)
+}
+
+func (s *Server) viewerWriter(vc *viewerConn) {
+	for msg := range vc.send {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := vc.conn.Write(ctx, websocket.MessageBinary, msg)
+		cancel()
+		if err != nil {
+			vc.conn.Close(websocket.StatusGoingAway, "write error")
+			for range vc.send {
+			}
+			return
+		}
+	}
 }
 
 func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn) {
 	defer func() {
 		sess.mu.Lock()
+		sess.closed = true
 		for _, vc := range sess.viewers {
 			sendControl(context.Background(), vc.conn, protocol.CtrlSessionEnded, nil)
-			vc.conn.Close(websocket.StatusNormalClosure, "session-ended")
+			close(vc.send)
 		}
 		sess.viewers = nil
 		sess.mu.Unlock()
-		close(sess.done)
 
 		s.mu.Lock()
 		delete(s.sessions, sessionID)
 		s.mu.Unlock()
 	}()
 
+	timeout := time.Duration(protocol.SharerTimeoutSec) * time.Second
 	for {
-		_, data, err := conn.Read(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		_, data, err := conn.Read(ctx)
+		cancel()
 		if err != nil {
 			return
 		}
@@ -147,8 +193,14 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 		switch data[0] {
 		case protocol.MsgTypeStream:
 			sess.mu.Lock()
-			for _, vc := range sess.viewers {
-				_ = vc.conn.Write(context.Background(), websocket.MessageBinary, data)
+			for id, vc := range sess.viewers {
+				select {
+				case vc.send <- data:
+				default:
+					close(vc.send)
+					vc.conn.Close(websocket.StatusPolicyViolation, "slow consumer")
+					delete(sess.viewers, id)
+				}
 			}
 			sess.mu.Unlock()
 
@@ -159,7 +211,13 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 			targetID := string(data[1 : 1+protocol.ViewerIDLen])
 			sess.mu.Lock()
 			if vc, ok := sess.viewers[targetID]; ok {
-				_ = vc.conn.Write(context.Background(), websocket.MessageBinary, data)
+				select {
+				case vc.send <- data:
+				default:
+					close(vc.send)
+					vc.conn.Close(websocket.StatusPolicyViolation, "slow consumer")
+					delete(sess.viewers, targetID)
+				}
 			}
 			sess.mu.Unlock()
 
@@ -172,12 +230,18 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 func (s *Server) runViewer(sess *session, vc *viewerConn) {
 	defer func() {
 		sess.mu.Lock()
-		delete(sess.viewers, vc.id)
+		if _, ok := sess.viewers[vc.id]; ok {
+			close(vc.send)
+			delete(sess.viewers, vc.id)
+		}
 		sess.mu.Unlock()
 	}()
 
+	timeout := time.Duration(protocol.ViewerTimeoutSec) * time.Second
 	for {
-		_, data, err := vc.conn.Read(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		_, data, err := vc.conn.Read(ctx)
+		cancel()
 		if err != nil {
 			return
 		}
@@ -192,7 +256,9 @@ func (s *Server) runViewer(sess *session, vc *viewerConn) {
 			copy(tagged[1:1+protocol.ViewerIDLen], vc.id)
 			copy(tagged[1+protocol.ViewerIDLen:], data[1:])
 			sess.mu.Lock()
-			_ = sess.sharer.Write(context.Background(), websocket.MessageBinary, tagged)
+			if !sess.closed {
+				_ = sess.sharer.Write(context.Background(), websocket.MessageBinary, tagged)
+			}
 			sess.mu.Unlock()
 
 		case protocol.MsgTypeHeartbeat:
@@ -210,13 +276,15 @@ func sendControl(ctx context.Context, conn *websocket.Conn, subType byte, payloa
 }
 
 func generateViewerID() (string, error) {
-	b := make([]byte, protocol.ViewerIDLen)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generating viewer ID: %w", err)
-	}
 	charset := protocol.ViewerIDCharset
+	max := big.NewInt(int64(len(charset)))
+	b := make([]byte, protocol.ViewerIDLen)
 	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", fmt.Errorf("generating viewer ID: %w", err)
+		}
+		b[i] = charset[n.Int64()]
 	}
 	return string(b), nil
 }

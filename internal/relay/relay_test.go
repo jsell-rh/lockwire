@@ -2,13 +2,25 @@ package relay
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/jsell-rh/lockwire/internal/protocol"
 	"github.com/coder/websocket"
+	"github.com/jsell-rh/lockwire/internal/protocol"
 )
+
+func randomSessionID(t *testing.T) string {
+	t.Helper()
+	b := make([]byte, protocol.SessionIDLen)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("generating session ID: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
 
 func startTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
@@ -26,7 +38,7 @@ func dialShare(t *testing.T, ts *httptest.Server, sessionID string) *websocket.C
 	if err != nil {
 		t.Fatalf("dial share: %v", err)
 	}
-	t.Cleanup(func() { conn.Close(websocket.StatusNormalClosure, "") })
+	t.Cleanup(func() { conn.CloseNow() })
 	return conn
 }
 
@@ -38,7 +50,7 @@ func dialWatch(t *testing.T, ts *httptest.Server, sessionID string) *websocket.C
 	if err != nil {
 		t.Fatalf("dial watch: %v", err)
 	}
-	t.Cleanup(func() { conn.Close(websocket.StatusNormalClosure, "") })
+	t.Cleanup(func() { conn.CloseNow() })
 	return conn
 }
 
@@ -64,7 +76,8 @@ func writeMsg(t *testing.T, conn *websocket.Conn, data []byte) {
 
 func TestSharerRegistration(t *testing.T) {
 	_, ts := startTestServer(t)
-	conn := dialShare(t, ts, "abc123")
+	sid := randomSessionID(t)
+	conn := dialShare(t, ts, sid)
 
 	msg := readMsg(t, conn)
 	if len(msg) < 2 {
@@ -80,11 +93,12 @@ func TestSharerRegistration(t *testing.T) {
 
 func TestDuplicateSessionID(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	conn1 := dialShare(t, ts, "dup-session")
-	_ = readMsg(t, conn1) // consume registration-ack
+	conn1 := dialShare(t, ts, sid)
+	_ = readMsg(t, conn1)
 
-	conn2 := dialShare(t, ts, "dup-session")
+	conn2 := dialShare(t, ts, sid)
 	msg := readMsg(t, conn2)
 
 	if len(msg) < 2 {
@@ -100,11 +114,12 @@ func TestDuplicateSessionID(t *testing.T) {
 
 func TestViewerJoinsActiveSession(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "session-1")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	viewer := dialWatch(t, ts, "session-1")
+	viewer := dialWatch(t, ts, sid)
 	msg := readMsg(t, viewer)
 
 	if len(msg) < 2+protocol.ViewerIDLen {
@@ -126,14 +141,15 @@ func TestViewerJoinsActiveSession(t *testing.T) {
 
 func TestViewerJoinsNonexistentSession(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/no-such-session", nil)
+	conn, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+sid, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer conn.CloseNow()
 
 	msg := readMsg(t, conn)
 	if len(msg) < 2 {
@@ -146,14 +162,15 @@ func TestViewerJoinsNonexistentSession(t *testing.T) {
 
 func TestBlobBroadcast(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "broadcast-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	viewerA := dialWatch(t, ts, "broadcast-session")
+	viewerA := dialWatch(t, ts, sid)
 	_ = readMsg(t, viewerA)
 
-	viewerB := dialWatch(t, ts, "broadcast-session")
+	viewerB := dialWatch(t, ts, sid)
 	_ = readMsg(t, viewerB)
 
 	payload := []byte{protocol.MsgTypeStream, 0xDE, 0xAD, 0xBE, 0xEF}
@@ -172,11 +189,12 @@ func TestBlobBroadcast(t *testing.T) {
 
 func TestSPAKE2UnicastToSharer(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "spake-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	viewer := dialWatch(t, ts, "spake-session")
+	viewer := dialWatch(t, ts, sid)
 	ack := readMsg(t, viewer)
 	viewerID := string(ack[2 : 2+protocol.ViewerIDLen])
 
@@ -202,11 +220,12 @@ func TestSPAKE2UnicastToSharer(t *testing.T) {
 
 func TestUnicastToViewer(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "unicast-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	viewer := dialWatch(t, ts, "unicast-session")
+	viewer := dialWatch(t, ts, sid)
 	ack := readMsg(t, viewer)
 	viewerID := string(ack[2 : 2+protocol.ViewerIDLen])
 
@@ -227,8 +246,9 @@ func TestUnicastToViewer(t *testing.T) {
 
 func TestHeartbeat(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "hb-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
 	ping := []byte{protocol.MsgTypeHeartbeat}
@@ -240,13 +260,31 @@ func TestHeartbeat(t *testing.T) {
 	}
 }
 
-func TestSharerDisconnectNotifiesViewers(t *testing.T) {
+func TestViewerHeartbeat(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "teardown-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	viewer := dialWatch(t, ts, "teardown-session")
+	viewer := dialWatch(t, ts, sid)
+	_ = readMsg(t, viewer)
+
+	writeMsg(t, viewer, []byte{protocol.MsgTypeHeartbeat})
+	pong := readMsg(t, viewer)
+	if len(pong) < 1 || pong[0] != protocol.MsgTypePong {
+		t.Errorf("viewer pong = %x, want [%02x]", pong, protocol.MsgTypePong)
+	}
+}
+
+func TestSharerDisconnectNotifiesViewers(t *testing.T) {
+	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
+
+	sharer := dialShare(t, ts, sid)
+	_ = readMsg(t, sharer)
+
+	viewer := dialWatch(t, ts, sid)
 	_ = readMsg(t, viewer)
 
 	sharer.Close(websocket.StatusNormalClosure, "done")
@@ -263,22 +301,23 @@ func TestSharerDisconnectNotifiesViewers(t *testing.T) {
 func TestMaxViewersExceeded(t *testing.T) {
 	srv, ts := startTestServer(t)
 	srv.maxViewers = 2
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "full-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	v1 := dialWatch(t, ts, "full-session")
+	v1 := dialWatch(t, ts, sid)
 	_ = readMsg(t, v1)
-	v2 := dialWatch(t, ts, "full-session")
+	v2 := dialWatch(t, ts, sid)
 	_ = readMsg(t, v2)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	v3, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/full-session", nil)
+	v3, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+sid, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer v3.Close(websocket.StatusNormalClosure, "")
+	defer v3.CloseNow()
 
 	msg := readMsg(t, v3)
 	if len(msg) < 2 {
@@ -289,31 +328,16 @@ func TestMaxViewersExceeded(t *testing.T) {
 	}
 }
 
-func TestViewerHeartbeat(t *testing.T) {
-	_, ts := startTestServer(t)
-
-	sharer := dialShare(t, ts, "vhb-session")
-	_ = readMsg(t, sharer)
-
-	viewer := dialWatch(t, ts, "vhb-session")
-	_ = readMsg(t, viewer)
-
-	writeMsg(t, viewer, []byte{protocol.MsgTypeHeartbeat})
-	pong := readMsg(t, viewer)
-	if len(pong) < 1 || pong[0] != protocol.MsgTypePong {
-		t.Errorf("viewer pong = %x, want [%02x]", pong, protocol.MsgTypePong)
-	}
-}
-
 func TestViewerDisconnectDoesNotAffectOthers(t *testing.T) {
 	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
 
-	sharer := dialShare(t, ts, "disconnect-session")
+	sharer := dialShare(t, ts, sid)
 	_ = readMsg(t, sharer)
 
-	v1 := dialWatch(t, ts, "disconnect-session")
+	v1 := dialWatch(t, ts, sid)
 	_ = readMsg(t, v1)
-	v2 := dialWatch(t, ts, "disconnect-session")
+	v2 := dialWatch(t, ts, sid)
 	_ = readMsg(t, v2)
 
 	v1.Close(websocket.StatusNormalClosure, "bye")
@@ -325,5 +349,52 @@ func TestViewerDisconnectDoesNotAffectOthers(t *testing.T) {
 	got := readMsg(t, v2)
 	if string(got) != string(payload) {
 		t.Errorf("v2 got %x, want %x", got, payload)
+	}
+}
+
+func TestInvalidSessionIDRejected(t *testing.T) {
+	_, ts := startTestServer(t)
+
+	cases := []struct {
+		name string
+		id   string
+	}{
+		{"too short", "abc123"},
+		{"too long", "0123456789abcdef0123456789abcdef00"},
+		{"not hex", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, resp, err := websocket.Dial(ctx, ts.URL+"/api/share/"+tc.id, nil)
+			if err == nil {
+				t.Fatal("expected dial to fail for invalid session ID")
+			}
+			if resp != nil && resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
+func TestUnicastToNonexistentViewerSilentlyDropped(t *testing.T) {
+	_, ts := startTestServer(t)
+	sid := randomSessionID(t)
+
+	sharer := dialShare(t, ts, sid)
+	_ = readMsg(t, sharer)
+
+	msg := make([]byte, 1+protocol.ViewerIDLen+3)
+	msg[0] = protocol.MsgTypeUnicast
+	copy(msg[1:1+protocol.ViewerIDLen], "zzzzzz")
+	copy(msg[1+protocol.ViewerIDLen:], []byte{0x01, 0x02, 0x03})
+	writeMsg(t, sharer, msg)
+
+	writeMsg(t, sharer, []byte{protocol.MsgTypeHeartbeat})
+	pong := readMsg(t, sharer)
+	if pong[0] != protocol.MsgTypePong {
+		t.Errorf("expected pong after dropped unicast, got %x", pong)
 	}
 }
