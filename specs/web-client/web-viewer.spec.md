@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The Lockwire web viewer allows a Viewer to watch a shared session in any modern browser without installing the `lw` binary. The web viewer is served by the relay at `https://<relay-host>/join/<code>` and performs all cryptographic operations (SPAKE2, AES-256-GCM) natively in the browser using the WebCrypto API. Terminal output is rendered in an xterm.js instance. The web viewer is read-only and cryptographically equivalent to the CLI Viewer.
+The Lockwire web viewer allows a Viewer to watch a shared session in any modern browser without installing the `lw` binary. The web viewer is served by the relay at `https://<relay-host>/join#<code>` and performs all cryptographic operations (SPAKE2, AES-256-GCM) natively in the browser using the WebCrypto API. Terminal output is rendered in an xterm.js instance. The web viewer is read-only and cryptographically equivalent to the CLI Viewer.
 
 ## Requirements
 
@@ -11,25 +11,34 @@ The Lockwire web viewer allows a Viewer to watch a shared session in any modern 
 The web viewer SHALL function in any modern browser (Chrome ≥ 111, Firefox ≥ 113, Safari ≥ 16.4) without plugins, extensions, or WASM downloads. All cryptographic primitives SHALL be sourced from the browser's native WebCrypto API.
 
 #### Scenario: First-time browser viewer
-- GIVEN a user receives the link `https://relay.lockwire.io/join/thunder-eagle-river-moon-stone-fire`
+- GIVEN a user receives the link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
 - WHEN they open it in a supported browser
 - THEN the page loads fully (HTML + JS) in under 2 seconds on a typical connection
 - AND no plugin prompt, install prompt, or download appears
 
 ---
 
-### Requirement: Code Pre-fill from URL
+### Requirement: Code in URL Fragment Only
 
-The web viewer SHALL extract the Code from the URL path and pre-populate the code input field. The user SHALL be able to edit the pre-filled code before initiating the session.
+The Code SHALL be carried in the URL fragment (the `#` portion), never in the path or query string. The fragment is stripped by the browser before any HTTP request is made, so the Code never reaches the relay server, Cloudflare, or any intermediate proxy. It does not appear in server access logs or Referrer headers.
 
-#### Scenario: Code in URL
-- GIVEN the URL is `https://relay.lockwire.io/join/thunder-eagle-river-moon-stone-fire`
-- WHEN the page loads
-- THEN the code input field contains `thunder-eagle-river-moon-stone-fire`
+The web viewer SHALL extract the Code from `window.location.hash` client-side and pre-populate the code input field. The user SHALL be able to edit the pre-filled code before initiating the session.
+
+#### Scenario: Code in URL fragment
+- GIVEN a user receives the link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
+- WHEN the browser loads the page
+- THEN the HTTP request sent to the relay is `GET /join` — the fragment is not transmitted
+- AND the web viewer reads `window.location.hash` and populates the code input field with `thunder-eagle-river-moon-stone-fire`
 - AND a "Watch" button is available
 
+#### Scenario: Relay logs contain no Code
+- GIVEN a session link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire` is used
+- WHEN the relay's access logs are inspected
+- THEN the log entry shows `GET /join` with no Code present
+- AND Cloudflare or any reverse proxy in front of the relay similarly records no Code
+
 #### Scenario: No code in URL
-- GIVEN the URL is `https://relay.lockwire.io`
+- GIVEN a user opens `https://relay.lockwire.io` or `https://relay.lockwire.io/join`
 - WHEN the page loads
 - THEN the code input field is empty
 - AND the user must type the Code before clicking "Watch"

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A Session is the core unit of Lockwire. It represents a live terminal sharing instance initiated by a Sharer and observed by zero or more Viewers. Sessions are ephemeral: they exist only while the Sharer's process is running. All cryptographic material is held in memory and zeroed on termination. Viewers may join via the CLI (`lw join <code>`) or via a browser link (`https://<relay>/join/<code>`); both paths produce an identical read-only live view.
+A Session is the core unit of Lockwire. It represents a live terminal sharing instance initiated by a Sharer and observed by zero or more Viewers. Sessions are ephemeral: they exist only while the Sharer's process is running. All cryptographic material is held in memory and zeroed on termination. Viewers may join via the CLI (`lw join <code>`) or via a browser link (`https://<relay>/join#<code>`); both paths produce an identical read-only live view.
 
 ## Requirements
 
@@ -16,7 +16,7 @@ The system SHALL create a new Session when the Sharer runs `lw share`, connectin
 - THEN two lines are printed to stdout:
   ```
   code: thunder-eagle-river-moon-stone-fire
-  link: https://relay.lockwire.io/join/thunder-eagle-river-moon-stone-fire
+  link: https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire
   ```
 - AND the Sharer's terminal output (pty) is captured and streamed from that point forward
 
@@ -75,10 +75,10 @@ The system SHALL allow a Viewer to join an active Session by running `lw join <c
 
 ### Requirement: Session Joining (Web Browser)
 
-The system SHALL allow a Viewer to join an active Session via a browser by navigating to `https://<relay-host>/join/<code>`, entering the Code if not pre-filled, and viewing the Sharer's terminal rendered in xterm.js. The cryptographic operations (SPAKE2, AES-256-GCM) SHALL execute in the browser using the WebCrypto API.
+The system SHALL allow a Viewer to join an active Session via a browser by navigating to `https://<relay-host>/join#<code>`, entering the Code if not pre-filled, and viewing the Sharer's terminal rendered in xterm.js. The cryptographic operations (SPAKE2, AES-256-GCM) SHALL execute in the browser using the WebCrypto API.
 
 #### Scenario: Browser join via URL
-- GIVEN a user opens `https://relay.lockwire.io/join/thunder-eagle-river-moon-stone-fire`
+- GIVEN a user opens `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
 - WHEN the page loads
 - THEN the Code is pre-populated in the input field
 - AND the user clicks "Watch"

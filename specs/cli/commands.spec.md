@@ -30,7 +30,7 @@ The system SHALL start a terminal sharing session, print the Code and watch URL,
 - THEN exactly two lines are printed to stdout:
   ```
   code: thunder-eagle-river-moon-stone-fire
-  link: https://relay.lockwire.io/join/thunder-eagle-river-moon-stone-fire
+  link: https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire
   ```
 - AND subsequent output is the Sharer's normal terminal (no additional cli output)
 
