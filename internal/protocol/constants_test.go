@@ -28,3 +28,38 @@ func TestConstantsMatchSpec(t *testing.T) {
 		t.Errorf("GCMTagLen = %d, want 16 (128-bit)", GCMTagLen)
 	}
 }
+
+func TestMessageTypeConstants(t *testing.T) {
+	cases := []struct {
+		name string
+		got  byte
+		want byte
+	}{
+		{"MsgTypeSPAKE2", MsgTypeSPAKE2, 0x01},
+		{"MsgTypeStream", MsgTypeStream, 0x02},
+		{"MsgTypeUnicast", MsgTypeUnicast, 0x03},
+		{"MsgTypeHeartbeat", MsgTypeHeartbeat, 0x04},
+		{"MsgTypePong", MsgTypePong, 0x05},
+		{"MsgTypeControl", MsgTypeControl, 0x06},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = 0x%02x, want 0x%02x", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestRelayLimitConstants(t *testing.T) {
+	if DefaultMaxViewers != 20 {
+		t.Errorf("DefaultMaxViewers = %d, want 20", DefaultMaxViewers)
+	}
+	if ViewerBufferLimitBytes != 512*1024 {
+		t.Errorf("ViewerBufferLimitBytes = %d, want %d", ViewerBufferLimitBytes, 512*1024)
+	}
+	if SharerTimeoutSec != 10 {
+		t.Errorf("SharerTimeoutSec = %d, want 10", SharerTimeoutSec)
+	}
+	if ViewerTimeoutSec != 30 {
+		t.Errorf("ViewerTimeoutSec = %d, want 30", ViewerTimeoutSec)
+	}
+}

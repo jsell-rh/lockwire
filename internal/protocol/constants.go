@@ -1,8 +1,8 @@
 package protocol
 
 const (
-	SessionIDHMACKey = "lw-session-id"
-	EpochKeyInfoPrefix = "lw-epoch-"
+	SessionIDHMACKey    = "lw-session-id"
+	EpochKeyInfoPrefix  = "lw-epoch-"
 	SPAKE2AssociatedData = "lockwire-v1"
 
 	KeyLen       = 32
@@ -13,7 +13,22 @@ const (
 
 	CodeWordCount = 6
 
-	EpochDurationSec       = 60
-	EpochGracePeriodSec    = 5
-	ViewerIDCharset        = "abcdefghijklmnopqrstuvwxyz0123456789"
+	EpochDurationSec    = 60
+	EpochGracePeriodSec = 5
+	ViewerIDCharset     = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+	// Wire message type bytes (relay-protocol spec § Message Framing).
+	MsgTypeSPAKE2    byte = 0x01 // Viewer → Relay → Sharer
+	MsgTypeStream    byte = 0x02 // Sharer → Relay → all Viewers (broadcast)
+	MsgTypeUnicast   byte = 0x03 // Sharer → Relay → one Viewer
+	MsgTypeHeartbeat byte = 0x04 // Either → Relay (ping)
+	MsgTypePong      byte = 0x05 // Relay → either (pong)
+	MsgTypeControl   byte = 0x06 // Relay → Viewer (session control)
+
+	// Relay limits.
+	DefaultMaxViewers       = 20
+	ViewerBufferLimitBytes  = 512 * 1024 // 512 KB outbound buffer before disconnect
+	SharerTimeoutSec        = 10
+	ViewerTimeoutSec        = 30
+	HeartbeatIntervalSec    = 5
 )
