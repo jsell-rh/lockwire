@@ -7,7 +7,7 @@
 <style>
 /* __XTERM_CSS__ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:#1a1a2e;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
+html,body{height:100%;background:#161616;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
 body{display:flex;align-items:center;justify-content:center}
 
 .container{width:100%;max-width:600px;padding:2rem}
@@ -17,14 +17,14 @@ h1{font-size:1.5rem;font-weight:600;margin-bottom:0.25rem;color:#fff}
 
 #code{
   flex:1;padding:0.75rem 1rem;font-size:1rem;font-family:monospace;
-  background:#16213e;border:1px solid #0f3460;border-radius:6px;color:#e0e0e0;
+  background:#4a4a4a;border:1px solid #5b5b5b;border-radius:6px;color:#e0e0e0;
   outline:none;transition:border-color 0.2s
 }
-#code:focus{border-color:#e94560}
+#code:focus{border-color:#e29f00}
 
 #watch{
   padding:0.75rem 1.5rem;font-size:1rem;font-weight:600;
-  background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;
+  background:#e29f00;color:#161616;border:none;border-radius:6px;cursor:pointer;
   transition:opacity 0.2s
 }
 #watch:hover{opacity:0.9}
@@ -58,11 +58,17 @@ h1{font-size:1.5rem;font-weight:600;margin-bottom:0.25rem;color:#fff}
   z-index:5;display:none
 }
 .size-banner.visible{display:block}
+
+@media(max-width:480px){
+  .form-group{flex-direction:column}
+  #code{width:100%}
+  #watch{width:100%}
+}
 </style>
 </head>
 <body>
 <div class="container" id="pre-join">
-  <h1>Lockwire</h1>
+  <h1>&#x1f6e1;&#xfe0f; Lockwire</h1>
   <p class="subtitle">Secure Terminal Screen Sharing</p>
   <div class="form-group">
     <input type="text" id="code" placeholder="enter code" autocomplete="off" spellcheck="false">
