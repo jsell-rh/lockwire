@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Lockwire is distributed as a single static binary, `lw`. It exposes subcommands: `share`, `join`, `revoke`, `list`, and `help`. The CLI is the primary user-facing surface. All cryptographic operations happen in-process. The UX must require zero configuration for the common case.
+Lockwire is distributed as a single static binary, `lw`. It exposes subcommands: `share`, `join`, `revoke`, `list`, `relay`, and `help`. The CLI is the primary user-facing surface. All cryptographic operations happen in-process. The UX must require zero configuration for the common case.
 
 `lw revoke` and `lw list` communicate with a running `lw share` process via a Unix domain socket at `$TMPDIR/lw-<pid>.sock`. The Sharer's process creates and listens on this socket at startup; control commands locate it via a PID file at `$TMPDIR/lw.pid`.
 
@@ -135,7 +135,9 @@ The system SHALL revoke a specific Viewer's access from the active local session
 The `--relay` flag SHALL accept a WebSocket URL with the following constraints:
 - Scheme MUST be `wss://` (TLS required); `ws://` SHALL be rejected with an error
 - A path component is allowed (e.g. `wss://host/lockwire`)
-- Self-signed TLS certificates SHALL be rejected by default; `--relay-insecure` MAY be used to override for development
+- Self-signed TLS certificates SHALL be rejected by default; `--relay-insecure` skips TLS certificate chain and hostname verification and MUST be used when connecting to a Relay with a self-signed certificate (the TLS handshake will otherwise fail)
+
+When `--relay-insecure` is active, the binary SHALL print `warning: TLS certificate verification disabled` to stderr before connecting.
 
 #### Scenario: Non-TLS relay rejected
 - GIVEN a user runs `lw share --relay ws://localhost:8080`
@@ -143,12 +145,101 @@ The `--relay` flag SHALL accept a WebSocket URL with the following constraints:
 - THEN the process exits with status 1
 - AND `error: relay URL must use wss:// (TLS required)` is printed to stderr
 
+#### Scenario: `--relay-insecure` warning on share
+- GIVEN a user runs `lw share --relay wss://localhost:8443 --relay-insecure`
+- WHEN the command starts
+- THEN `warning: TLS certificate verification disabled` is printed to stderr before the connection is established
+- AND the command proceeds normally
+
+#### Scenario: `--relay-insecure` warning on join
+- GIVEN a user runs `lw join <code> --relay wss://localhost:8443 --relay-insecure`
+- WHEN the command starts
+- THEN `warning: TLS certificate verification disabled` is printed to stderr before the connection is established
+- AND the command proceeds normally
+
+---
+
+### Requirement: `lw relay`
+
+When run as `lw relay`, the binary SHALL act as a Relay server, listening on a configurable TCP address over TLS. The Relay SHALL require exactly one TLS certificate configuration: either `--tls-cert` and `--tls-key` together, or `--self-signed`. These two modes are mutually exclusive. The default listen address is `:8443`; this is configurable via `--listen`. The Relay SHALL require TLS 1.2 or later.
+
+When `--self-signed` is specified, the Relay SHALL generate a TLS certificate and private key at startup without requiring any files on disk. The generated certificate SHALL use ECDSA P-256 or RSA-2048, be valid for at least one year, and include SubjectAltNames as follows: if the `--listen` address contains an explicit hostname (e.g., `relay.example.com:8443`), the SAN SHALL cover that hostname; if the listen address has no hostname (e.g., `:8443` or `0.0.0.0:8443`), the SAN SHALL cover `127.0.0.1` and `::1`. This mode is intended for development and self-hosted deployments where a CA-signed certificate is not available. Clients connecting to a Relay using a self-signed certificate MUST use `--relay-insecure`.
+
+#### Scenario: Start Relay with explicit certificate files
+- GIVEN a user runs `lw relay --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem`
+- WHEN the Relay starts successfully
+- THEN the Relay listens on `:8443` (or the address specified by `--listen`)
+- AND prints to stderr:
+  ```
+  relay listening on <addr>
+  web viewer at https://<addr>/join
+  ```
+  where `<addr>` is the resolved bound TCP address as reported by the OS (e.g., `[::]:8443`)
+- AND nothing is printed to stdout
+
+#### Scenario: Start Relay with self-signed certificate
+- GIVEN a user runs `lw relay --self-signed`
+- WHEN the Relay starts successfully
+- THEN the Relay generates a TLS certificate and private key at startup
+- AND listens on the configured address using that certificate
+- AND prints to stderr:
+  ```
+  relay listening on <addr> (self-signed; use --relay-insecure to connect)
+  fingerprint: SHA256:<colon-separated uppercase hex pairs, e.g. AA:BB:CC:...>
+  web viewer at https://<addr>/join
+  ```
+- AND nothing is printed to stdout
+
+#### Scenario: --self-signed conflicts with explicit cert flags
+- GIVEN a user runs `lw relay` with `--self-signed` and any of `--tls-cert` or `--tls-key` (any combination)
+- WHEN the flags are parsed (conflict detection takes precedence over pair-completeness checking)
+- THEN the process exits with status 1
+- AND prints `error: --self-signed cannot be used with --tls-cert or --tls-key` to stderr
+
+#### Scenario: No TLS configuration provided
+- GIVEN a user runs `lw relay` without any of `--tls-cert`, `--tls-key`, or `--self-signed`
+- WHEN the flags are parsed
+- THEN the process exits with status 1
+- AND prints `error: --tls-cert and --tls-key are required (or use --self-signed)` to stderr
+
+#### Scenario: Only one of --tls-cert / --tls-key provided (without --self-signed)
+- GIVEN a user runs `lw relay --tls-cert /path/to/cert.pem` without `--tls-key`, or `--tls-key /path/to/key.pem` without `--tls-cert`, and `--self-signed` is not set
+- WHEN the flags are parsed
+- THEN the process exits with status 1
+- AND prints `error: --tls-cert and --tls-key must be used together` to stderr
+
+#### Scenario: Certificate file unreadable
+- GIVEN a user runs `lw relay --tls-cert /nonexistent.pem --tls-key /path/to/key.pem`
+- WHEN the Relay attempts to load the certificate
+- THEN the process exits with status 1
+- AND prints `error: could not load TLS certificate: <os-error>` to stderr
+- (where `<os-error>` is the verbatim OS error string, e.g. `open /nonexistent.pem: no such file or directory`)
+
+#### Scenario: Key file unreadable
+- GIVEN a user runs `lw relay --tls-cert /path/to/cert.pem --tls-key /nonexistent.key`
+- WHEN the Relay attempts to load the key
+- THEN the process exits with status 1
+- AND prints `error: could not load TLS private key: <os-error>` to stderr
+
+#### Scenario: Listen address unavailable
+- GIVEN a user runs `lw relay --self-signed --listen :9000` and port 9000 is already bound, or the operator lacks privilege to bind the requested port
+- WHEN the Relay attempts to bind the address
+- THEN the process exits with status 1
+- AND prints `error: could not listen on <addr>: <os-error>` to stderr
+
+#### Scenario: Graceful shutdown
+- GIVEN the Relay is running
+- WHEN the process receives SIGTERM or SIGINT
+- THEN the Relay stops accepting new connections
+- AND waits up to 10 seconds for in-flight connections to close
+- AND exits with status 0 without printing any shutdown message
+
 ---
 
 ### Requirement: Global Flags and Help
 
 The binary SHALL support:
-- `lw --version` → prints `tv <semver>` to stdout
+- `lw --version` → prints `lw <semver>` to stdout
 - `lw --help` or `lw help` → prints usage summary to stdout
 - `lw <subcommand> --help` → prints subcommand-specific help
 
