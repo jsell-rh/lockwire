@@ -71,6 +71,7 @@ The system SHALL connect to an active session identified by the Code, show a con
 - GIVEN a session is active for the Code
 - WHEN a user runs `lw join thunder-eagle-river-moon-stone-fire`
 - THEN `connecting…` is displayed, then replaced by the Sharer's terminal upon stream start
+- AND a Warning Amber status bar is rendered on the bottom row (see Session Lifecycle § Viewer Status Bar)
 - AND the user cannot send keystrokes to the Sharer's session
 
 #### Scenario: Session ends while Viewer is watching (clean)

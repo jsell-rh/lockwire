@@ -73,6 +73,34 @@ The system SHALL allow a Viewer to join an active Session by running `lw join <c
 
 ---
 
+### Requirement: Viewer Status Bar (CLI)
+
+The system SHALL render a single-row status bar on the bottom row of the CLI Viewer's terminal for the duration of the session. The Viewer's terminal SHALL be placed in raw mode with a scroll region of `(rows − 1)`, leaving the bottom row exclusively for lockwire. The Sharer's terminal output is displayed within this scroll region.
+
+The status bar SHALL be rendered with black text on a Warning Amber (`#FFB000`) background using true color: `\033[30;48;2;255;176;0m`. This matches the brand palette's "session state" color and is visually distinct from the Sharer's Cyber Cyan bar.
+
+When the Sharer's terminal dimensions are received, the Viewer SHOULD attempt to resize its local terminal to match the Sharer's column width using the ANSI window resize sequence (`\033[8;rows;cols;t`). If the resize is not supported by the terminal emulator, the Viewer SHALL display what fits.
+
+#### Scenario: Viewer status bar steady state
+- GIVEN a CLI Viewer is watching an active session
+- WHEN the stream is active
+- THEN the status bar displays: `lw | watching <truncated-code>`
+- AND the bar spans the full terminal width, padded with spaces
+
+#### Scenario: Viewer status bar on terminal size mismatch
+- GIVEN a CLI Viewer's terminal is smaller than the Sharer's
+- WHEN the Sharer's dimensions are received
+- THEN the status bar displays: `lw | watching <code> [sharer: <cols>×<rows>]`
+
+#### Scenario: Viewer status bar cleared on exit
+- GIVEN a CLI Viewer is watching with a status bar
+- WHEN the session ends (any reason)
+- THEN the scroll region is reset
+- AND the status bar row is cleared
+- AND the terminal is restored to its original state before the exit message is printed
+
+---
+
 ### Requirement: Session Joining (Web Browser)
 
 The system SHALL allow a Viewer to join an active Session via a browser by navigating to `https://<relay-host>/join#<code>`, entering the Code if not pre-filled, and viewing the Sharer's terminal rendered in xterm.js. The cryptographic operations (SPAKE2, AES-256-GCM) SHALL execute in the browser using the WebCrypto API.
@@ -119,7 +147,7 @@ The Sharer's pty dimensions (columns and rows) SHALL be transmitted to all Viewe
 
 The system SHALL render a single-row status bar on the bottom row of the Sharer's terminal for the duration of the session. The PTY allocated to the Sharer's shell SHALL have dimensions `(cols, rows − 1)`, leaving the bottom row exclusively for lockwire. The status bar SHALL NOT interfere with the Sharer's shell — all shell operations, full-screen programs, and terminal features SHALL work normally within the PTY region.
 
-The status bar SHALL be rendered with inverted (reverse-video) colors to visually separate it from terminal content.
+The status bar SHALL be rendered with black text on a Cyber Cyan (`#00F0FF`) background using true color: `\033[30;48;2;0;240;255m`. This matches the brand palette's "active stream" color.
 
 #### Scenario: Status bar steady state
 - GIVEN a session is active with two Viewers
