@@ -120,6 +120,11 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	go func() {
+		<-ctx.Done()
+		term.Close()
+	}()
+
 	sh := sharer.New(sess, relay, []byte(pairingCode), probe)
 
 	sockPath := ipc.SocketPath(os.Getpid())
