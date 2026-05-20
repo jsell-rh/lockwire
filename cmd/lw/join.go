@@ -106,6 +106,7 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 			return "lw | watching " + normalized + suffix
 		},
 	})
+	fmt.Fprint(os.Stdout, "\033[2J\033[H")
 	bar.SetScrollRegion()
 	bar.Draw()
 	defer func() {
