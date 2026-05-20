@@ -82,7 +82,15 @@ func newRelayCmd() *cobra.Command {
 }
 
 func startRelay(ctx context.Context, cmd *cobra.Command, listen, certFile, keyFile string) error {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		return fmt.Errorf("could not load TLS certificate: %w", err)
+	}
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		return fmt.Errorf("could not load TLS private key: %w", err)
+	}
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return fmt.Errorf("could not load TLS certificate: %w", err)
 	}
@@ -112,7 +120,7 @@ func serveRelay(ctx context.Context, cmd *cobra.Command, listen string, cert tls
 
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", listen, err)
+		return fmt.Errorf("could not listen on %s: %w", listen, err)
 	}
 
 	tlsLn := tls.NewListener(ln, &tls.Config{

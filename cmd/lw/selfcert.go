@@ -14,6 +14,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/jsell-rh/lockwire/internal/crypto"
 )
 
 func generateSelfSignedCert(listenAddr string) (tls.Certificate, string, error) {
@@ -59,6 +61,8 @@ func generateSelfSignedCert(listenAddr string) (tls.Certificate, string, error) 
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	crypto.ZeroBytes(keyDER)
+	crypto.ZeroBytes(keyPEM)
 	if err != nil {
 		return tls.Certificate{}, "", fmt.Errorf("loading key pair: %w", err)
 	}
