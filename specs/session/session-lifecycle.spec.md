@@ -115,6 +115,44 @@ The Sharer's pty dimensions (columns and rows) SHALL be transmitted to all Viewe
 
 ---
 
+### Requirement: Sharer Status Bar
+
+The system SHALL render a single-row status bar on the bottom row of the Sharer's terminal for the duration of the session. The PTY allocated to the Sharer's shell SHALL have dimensions `(cols, rows − 1)`, leaving the bottom row exclusively for lockwire. The status bar SHALL NOT interfere with the Sharer's shell — all shell operations, full-screen programs, and terminal features SHALL work normally within the PTY region.
+
+The status bar SHALL be rendered with inverted (reverse-video) colors to visually separate it from terminal content.
+
+#### Scenario: Status bar steady state
+- GIVEN a session is active with two Viewers
+- WHEN no viewer event has occurred in the last 5 seconds
+- THEN the status bar displays: `lw | code: <truncated-code> | <N> viewers`
+- AND the bar spans the full terminal width, padded with spaces
+
+#### Scenario: Status bar viewer event
+- GIVEN a session is active
+- WHEN a Viewer joins
+- THEN the status bar briefly displays: `lw | viewer joined: <id> (<type>)`
+- AND reverts to steady state after 5 seconds
+
+#### Scenario: Status bar on viewer disconnect
+- GIVEN a session is active
+- WHEN a Viewer disconnects
+- THEN the status bar briefly displays: `lw | viewer left: <id>`
+- AND reverts to steady state after 5 seconds
+
+#### Scenario: Status bar on revocation
+- GIVEN a session is active
+- WHEN the Sharer revokes a Viewer
+- THEN the status bar briefly displays: `lw | revoked: <id>`
+- AND reverts to steady state after 5 seconds
+
+#### Scenario: Terminal resize with status bar
+- GIVEN a session is active with a status bar
+- WHEN the Sharer resizes their terminal
+- THEN the PTY is resized to `(new_cols, new_rows − 1)`
+- AND the status bar is redrawn on the new bottom row
+
+---
+
 ### Requirement: Session Termination
 
 The system SHALL terminate the Session when the Sharer's process exits, immediately notifying the relay and disconnecting all Viewers. The reason for termination SHALL be communicated to Viewers.
@@ -188,5 +226,7 @@ The system SHALL allow the Sharer to revoke an individual Viewer's access withou
 #### Scenario: Viewer join notification
 - GIVEN a session is active
 - WHEN Viewer A joins successfully
-- THEN a line is printed on the Sharer's terminal: `viewer joined: a3k9x7 (cli)`
-- AND when Viewer A disconnects: `viewer left: a3k9x7`
+- THEN the status bar briefly displays `lw | viewer joined: a3k9x7 (cli)`
+- AND the viewer count in the status bar steady state is incremented
+- AND when Viewer A disconnects, the status bar briefly displays `lw | viewer left: a3k9x7`
+- AND the viewer count is decremented

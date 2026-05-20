@@ -32,7 +32,9 @@ The system SHALL start a terminal sharing session, print the Code and watch URL,
   code: thunder-eagle-river-moon-stone-fire
   link: https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire
   ```
-- AND subsequent output is the Sharer's normal terminal (no additional cli output)
+- AND the Sharer's shell is launched in a PTY occupying the full terminal except the bottom row
+- AND a status bar is rendered on the bottom row (see Session Lifecycle § Sharer Status Bar)
+- AND the Sharer's terminal experience is otherwise indistinguishable from their normal shell
 
 #### Scenario: Share with custom relay
 - GIVEN a user runs `lw share --relay wss://relay.example.com`
