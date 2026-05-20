@@ -43,6 +43,10 @@ func (f *fakeSession) RevokeViewer(id string) error {
 	return ErrViewerNotFound
 }
 
+func (f *fakeSession) StopSession() error {
+	return nil
+}
+
 // --- Recording probe ---
 
 type recordingProbe struct {

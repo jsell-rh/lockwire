@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -59,6 +60,11 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		os.Setenv("PATH", exeDir+":"+os.Getenv("PATH"))
 	}
 
 	stdinFd := int(os.Stdin.Fd())
@@ -117,7 +123,7 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	sh := sharer.New(sess, relay, []byte(pairingCode), probe)
 
 	sockPath := ipc.SocketPath(os.Getpid())
-	adapter := &ipcSessionAdapter{sess: sess, revoke: sh.Revoke}
+	adapter := &ipcSessionAdapter{sess: sess, revoke: sh.Revoke, stop: cancel}
 	ipcSrv, err := ipc.NewServer(sockPath, adapter, nil)
 	if err != nil {
 		return fmt.Errorf("starting control socket: %w", err)

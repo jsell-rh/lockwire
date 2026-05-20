@@ -36,6 +36,7 @@ type Response struct {
 type SessionHandler interface {
 	ListViewers() []ViewerInfo
 	RevokeViewer(id string) error
+	StopSession() error
 }
 
 type Probe interface {
@@ -124,6 +125,14 @@ func (s *Server) handle(conn net.Conn) {
 			resp.OK = true
 		}
 
+	case protocol.IPCCommandStop:
+		if err := s.handler.StopSession(); err != nil {
+			resp.Error = err.Error()
+			s.probe.RequestFailed(err)
+		} else {
+			resp.OK = true
+		}
+
 	default:
 		resp.Error = fmt.Sprintf("unknown command: %s", req.Command)
 		s.probe.RequestFailed(fmt.Errorf("unknown command: %s", req.Command))
@@ -157,6 +166,17 @@ func ClientList(sockPath string) ([]ViewerInfo, error) {
 
 func ClientRevoke(sockPath string, viewerID string) error {
 	resp, err := sendClientRequest(sockPath, Request{Command: protocol.IPCCommandRevoke, ViewerID: viewerID})
+	if err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+	return nil
+}
+
+func ClientStop(sockPath string) error {
+	resp, err := sendClientRequest(sockPath, Request{Command: protocol.IPCCommandStop})
 	if err != nil {
 		return err
 	}

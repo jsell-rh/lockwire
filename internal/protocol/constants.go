@@ -53,6 +53,7 @@ const (
 
 	IPCCommandList   = "list"
 	IPCCommandRevoke = "revoke"
+	IPCCommandStop   = "stop"
 
 	// Viewer revocation detection.
 	ViewerRevocationFailureThreshold = 10

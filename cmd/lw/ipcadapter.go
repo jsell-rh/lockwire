@@ -11,6 +11,7 @@ import (
 type ipcSessionAdapter struct {
 	sess   *session.Session
 	revoke func(ctx context.Context, viewerID string) error
+	stop   func()
 }
 
 func (a *ipcSessionAdapter) ListViewers() []ipc.ViewerInfo {
@@ -32,4 +33,11 @@ func (a *ipcSessionAdapter) RevokeViewer(id string) error {
 		return ipc.ErrViewerNotFound
 	}
 	return err
+}
+
+func (a *ipcSessionAdapter) StopSession() error {
+	if a.stop != nil {
+		a.stop()
+	}
+	return nil
 }

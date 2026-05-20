@@ -141,3 +141,7 @@ func (f *fakeIPCSession) RevokeViewer(id string) error {
 	}
 	return ipc.ErrViewerNotFound
 }
+
+func (f *fakeIPCSession) StopSession() error {
+	return nil
+}

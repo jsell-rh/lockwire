@@ -24,7 +24,7 @@ func newSharerProbe(out io.Writer, cols, totalRows uint16, code string) *statusB
 			if n == 1 {
 				noun = "viewer"
 			}
-			return fmt.Sprintf("lw | code: %s | %d %s", code, n, noun)
+			return fmt.Sprintf("lw | code: %s | %d %s | lw stop to end", code, n, noun)
 		},
 	})
 	return p
