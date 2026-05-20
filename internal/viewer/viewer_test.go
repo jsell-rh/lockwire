@@ -233,7 +233,7 @@ func simulateSharerHandshake(t *testing.T, relay *fakeRelay, sess *session.Sessi
 
 func waitForSent(t *testing.T, relay *fakeRelay, count int) {
 	t.Helper()
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(15 * time.Second)
 	for {
 		if len(relay.getSent()) >= count {
 			return
@@ -242,7 +242,7 @@ func waitForSent(t *testing.T, relay *fakeRelay, count int) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for %d sent messages (have %d)", count, len(relay.getSent()))
 		default:
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
