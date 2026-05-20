@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -429,6 +430,108 @@ func TestRelaySelfSignedPrintsFingerprint(t *testing.T) {
 
 	if !strings.Contains(output, "self-signed") {
 		t.Errorf("stderr should mention self-signed mode, got: %q", output)
+	}
+}
+
+func TestRelaySelfSignedBothTLSFlagsConflict(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--self-signed", "--tls-cert", "/tmp/cert.pem", "--tls-key", "/tmp/key.pem"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when --self-signed used with both --tls-cert and --tls-key")
+	}
+	want := "--self-signed cannot be used with --tls-cert or --tls-key"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want substring %q", err.Error(), want)
+	}
+}
+
+func TestSelfSignedCertProperties(t *testing.T) {
+	cert, fingerprint, err := generateSelfSignedCert(":8443")
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("parsing cert: %v", err)
+	}
+
+	// Valid for at least 1 year
+	validity := parsed.NotAfter.Sub(parsed.NotBefore)
+	if validity < 365*24*time.Hour {
+		t.Errorf("cert validity = %v, want >= 1 year", validity)
+	}
+
+	// ECDSA P-256
+	if parsed.PublicKeyAlgorithm != x509.ECDSA {
+		t.Errorf("key algorithm = %v, want ECDSA", parsed.PublicKeyAlgorithm)
+	}
+
+	// Fingerprint format: SHA256: followed by uppercase colon-separated hex pairs
+	if !strings.HasPrefix(fingerprint, "SHA256:") {
+		t.Errorf("fingerprint should start with SHA256:, got %q", fingerprint)
+	}
+	hexPart := strings.TrimPrefix(fingerprint, "SHA256:")
+	parts := strings.Split(hexPart, ":")
+	if len(parts) != 32 {
+		t.Errorf("fingerprint should have 32 hex pairs, got %d", len(parts))
+	}
+	for _, p := range parts {
+		if len(p) != 2 || p != strings.ToUpper(p) {
+			t.Errorf("fingerprint pair %q should be 2 uppercase hex chars", p)
+		}
+	}
+}
+
+func TestSelfSignedCertWildcardListenSAN(t *testing.T) {
+	cert, _, err := generateSelfSignedCert(":8443")
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("parsing cert: %v", err)
+	}
+
+	var hasIPv4Loopback, hasIPv6Loopback bool
+	for _, ip := range parsed.IPAddresses {
+		if ip.Equal(net.IPv4(127, 0, 0, 1)) {
+			hasIPv4Loopback = true
+		}
+		if ip.Equal(net.IPv6loopback) {
+			hasIPv6Loopback = true
+		}
+	}
+	if !hasIPv4Loopback {
+		t.Error("wildcard listen cert should include 127.0.0.1 SAN")
+	}
+	if !hasIPv6Loopback {
+		t.Error("wildcard listen cert should include ::1 SAN")
+	}
+}
+
+func TestSelfSignedCertExplicitHostSAN(t *testing.T) {
+	cert, _, err := generateSelfSignedCert("relay.example.com:8443")
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("parsing cert: %v", err)
+	}
+
+	found := false
+	for _, name := range parsed.DNSNames {
+		if name == "relay.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("cert DNSNames = %v, want to include relay.example.com", parsed.DNSNames)
 	}
 }
 
