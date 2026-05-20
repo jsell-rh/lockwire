@@ -38,6 +38,9 @@ chmod +x lw
 sudo mv lw /usr/local/bin/
 ```
 
+> [!NOTE]
+> By default, lockwire routes traffic through the public relay at `lockwire.online`. The relay is a blind pipe. It forwards encrypted blobs and never has access to your terminal content or keys. That said, the relay operator can see connection metadata (IP addresses, session timing, number of viewers). If that matters to you, [self-host the relay](#self-hosting-the-relay).
+
 ## Usage
 
 **Share your terminal:**
