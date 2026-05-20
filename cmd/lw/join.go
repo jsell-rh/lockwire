@@ -124,8 +124,8 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 		if wsErr != nil {
 			return
 		}
-		if ws.Col < cols || ws.Row-1 < rows {
-			sizeSuffix.Store(fmt.Sprintf(" [sharer: %d×%d]", cols, rows))
+		if ws.Col < cols {
+			sizeSuffix.Store(fmt.Sprintf(" [sharer: %d cols]", cols))
 		} else {
 			sizeSuffix.Store("")
 		}

@@ -40,16 +40,20 @@ import { LockwireClient, type ConnectionState } from "./client.js";
   let sharerCols = 0;
   let sharerRows = 0;
 
+  function viewportCols(): number {
+    return Math.floor(window.innerWidth / 9);
+  }
+
+  function viewportRows(): number {
+    return Math.floor(window.innerHeight / 17);
+  }
+
   function updateSizeBanner(): void {
     if (!term || sharerCols === 0) return;
-    const charWidth = 9;
-    const charHeight = 17;
-    const viewCols = Math.floor(window.innerWidth / charWidth);
-    const viewRows = Math.floor(window.innerHeight / charHeight);
-    if (sharerCols > viewCols || sharerRows > viewRows) {
+    const vCols = viewportCols();
+    if (sharerCols > vCols) {
       sizeBanner.textContent =
-        `[terminal too small — sharer: ${sharerCols}×${sharerRows}, ` +
-        `you: ${viewCols}×${viewRows}]`;
+        `[terminal too narrow — sharer: ${sharerCols} cols, you: ${vCols} cols]`;
       sizeBanner.classList.add("visible");
     } else {
       sizeBanner.classList.remove("visible");
@@ -121,7 +125,13 @@ import { LockwireClient, type ConnectionState } from "./client.js";
       return true;
     });
 
-    window.addEventListener("resize", updateSizeBanner);
+    window.addEventListener("resize", () => {
+      if (sharerCols > 0) {
+        const rows = Math.max(viewportRows(), sharerRows);
+        t.resize(sharerCols, rows);
+      }
+      updateSizeBanner();
+    });
 
     return t;
   }
@@ -150,7 +160,8 @@ import { LockwireClient, type ConnectionState } from "./client.js";
         if (term) {
           sharerCols = cols;
           sharerRows = rows;
-          term.resize(cols, rows);
+          const displayRows = Math.max(viewportRows(), rows);
+          term.resize(cols, displayRows);
           updateSizeBanner();
         }
       },

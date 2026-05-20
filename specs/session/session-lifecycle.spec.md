@@ -87,10 +87,10 @@ When the Sharer's terminal dimensions are received, the Viewer SHOULD attempt to
 - THEN the status bar displays: `lw | watching <truncated-code>`
 - AND the bar spans the full terminal width, padded with spaces
 
-#### Scenario: Viewer status bar on terminal size mismatch
-- GIVEN a CLI Viewer's terminal is smaller than the Sharer's
+#### Scenario: Viewer status bar on width mismatch
+- GIVEN a CLI Viewer's terminal is narrower than the Sharer's
 - WHEN the Sharer's dimensions are received
-- THEN the status bar displays: `lw | watching <code> [sharer: <cols>×<rows>]`
+- THEN the status bar displays: `lw | watching <code> [sharer: <cols> cols]`
 
 #### Scenario: Viewer status bar cleared on exit
 - GIVEN a CLI Viewer is watching with a status bar
@@ -127,14 +127,23 @@ The system SHALL allow a Viewer to join an active Session via a browser by navig
 
 ### Requirement: Terminal Size Propagation
 
-The Sharer's pty dimensions (columns and rows) SHALL be transmitted to all Viewers when they join and whenever the Sharer resizes their terminal. Viewers SHALL resize their display to match. If a Viewer's terminal is physically smaller than the Sharer's, the Viewer's client SHALL display what fits and scroll, rather than refusing to connect.
+The Sharer's pty dimensions (columns and rows) SHALL be transmitted to all Viewers when they join and whenever the Sharer resizes their terminal. Viewers SHALL set their column count to match the Sharer's to ensure correct cursor positioning and line wrapping. Row count differences are handled by scrollback and do not require a warning.
 
-#### Scenario: Viewer terminal smaller than Sharer's
+If a Viewer's terminal is narrower than the Sharer's, the Viewer SHALL display a width mismatch notice. Height mismatches SHALL NOT trigger a warning.
+
+#### Scenario: Viewer terminal narrower than Sharer's
 - GIVEN the Sharer's terminal is 220 columns × 50 rows
 - AND a Viewer's terminal is 80 columns × 24 rows
 - WHEN the Viewer joins
-- THEN the Viewer's client renders the top-left 80×24 portion of the Sharer's output
-- AND displays a notice: `[terminal too small — sharer: 220×50, you: 80×24]`
+- THEN the Viewer's client uses the Sharer's column count (220) for rendering
+- AND displays a notice: `[terminal too narrow — sharer: 220 cols, you: 80 cols]`
+
+#### Scenario: Viewer terminal shorter than Sharer's (no warning)
+- GIVEN the Sharer's terminal is 120 columns × 50 rows
+- AND a Viewer's terminal is 120 columns × 24 rows
+- WHEN the Viewer joins
+- THEN no size mismatch notice is displayed
+- AND content that scrolls past the Viewer's visible rows is accessible via scrollback
 
 #### Scenario: Sharer resizes terminal mid-session
 - GIVEN a Viewer is watching
