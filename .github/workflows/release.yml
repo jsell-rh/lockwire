@@ -149,3 +149,16 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.amd64.outputs.digest }}
           push-to-registry: true
+
+      - name: Clean up arch-specific tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          for arch in amd64 arm64; do
+            TAG_ID=$(gh api "/user/packages/container/lockwire/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VERSION}-${arch}\") | .id")
+            if [ -n "$TAG_ID" ]; then
+              gh api --method DELETE "/user/packages/container/lockwire/versions/${TAG_ID}" || true
+            fi
+          done
