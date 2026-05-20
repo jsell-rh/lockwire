@@ -1,30 +1,27 @@
 package main
 
-import (
-	"fmt"
-	"io"
-)
+import "fmt"
 
-type stdoutViewerProbe struct {
-	out io.Writer
+type viewerStatusBarProbe struct {
+	bar *statusBar
 }
 
-func (p *stdoutViewerProbe) Connecting() {}
+func (p *viewerStatusBarProbe) Connecting() {}
 
-func (p *stdoutViewerProbe) HandshakeCompleted(viewerID string) {
-	fmt.Fprint(p.out, "\r\033[K")
+func (p *viewerStatusBarProbe) HandshakeCompleted(viewerID string) {
+	fmt.Fprint(p.bar.out, "\r\033[K")
 }
 
-func (p *stdoutViewerProbe) FrameDecrypted(uint64, int) {}
+func (p *viewerStatusBarProbe) FrameDecrypted(uint64, int) {}
 
-func (p *stdoutViewerProbe) StreamKeyRotated() {}
+func (p *viewerStatusBarProbe) StreamKeyRotated() {}
 
-func (p *stdoutViewerProbe) AccessRevoked() {}
+func (p *viewerStatusBarProbe) AccessRevoked() {}
 
-func (p *stdoutViewerProbe) SessionEnded(string) {}
+func (p *viewerStatusBarProbe) SessionEnded(string) {}
 
-func (p *stdoutViewerProbe) HandshakeFailed(error) {}
+func (p *viewerStatusBarProbe) HandshakeFailed(error) {}
 
-func (p *stdoutViewerProbe) HeartbeatSent() {}
+func (p *viewerStatusBarProbe) HeartbeatSent() {}
 
-func (p *stdoutViewerProbe) TerminalResized(uint16, uint16) {}
+func (p *viewerStatusBarProbe) TerminalResized(uint16, uint16) {}

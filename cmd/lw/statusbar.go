@@ -7,24 +7,39 @@ import (
 	"time"
 )
 
+const (
+	colorCyberCyan   = "\033[30;48;2;0;240;255m"
+	colorWarningAmber = "\033[30;48;2;255;176;0m"
+	colorReset       = "\033[0m"
+)
+
 type statusBar struct {
 	mu          sync.Mutex
 	out         io.Writer
 	cols        uint16
 	totalRows   uint16
-	code        string
-	viewerCount int
+	colorSeq    string
+	content     func() string
 	transient   string
 	revertTimer *time.Timer
 	revertDelay time.Duration
 }
 
-func newStatusBar(out io.Writer, cols, totalRows uint16, code string) *statusBar {
+type statusBarConfig struct {
+	out       io.Writer
+	cols      uint16
+	totalRows uint16
+	color     string
+	content   func() string
+}
+
+func newStatusBar(cfg statusBarConfig) *statusBar {
 	return &statusBar{
-		out:         out,
-		cols:        cols,
-		totalRows:   totalRows,
-		code:        code,
+		out:         cfg.out,
+		cols:        cfg.cols,
+		totalRows:   cfg.totalRows,
+		colorSeq:    cfg.color,
+		content:     cfg.content,
 		revertDelay: 5 * time.Second,
 	}
 }
@@ -42,24 +57,14 @@ func (sb *statusBar) Draw() {
 }
 
 func (sb *statusBar) drawLocked() {
-	content := sb.renderContent()
-	padded := padOrTruncate(content, int(sb.cols))
-	fmt.Fprintf(sb.out, "\0337\033[%d;1H\033[7m%s\033[0m\0338", sb.totalRows, padded)
-}
-
-func (sb *statusBar) renderContent() string {
+	var text string
 	if sb.transient != "" {
-		return sb.transient
+		text = sb.transient
+	} else {
+		text = sb.content()
 	}
-	return sb.steadyState()
-}
-
-func (sb *statusBar) steadyState() string {
-	noun := "viewers"
-	if sb.viewerCount == 1 {
-		noun = "viewer"
-	}
-	return fmt.Sprintf("lw | code: %s | %d %s", sb.code, sb.viewerCount, noun)
+	padded := padOrTruncate(text, int(sb.cols))
+	fmt.Fprintf(sb.out, "\0337\033[%d;1H%s%s%s\0338", sb.totalRows, sb.colorSeq, padded, colorReset)
 }
 
 func (sb *statusBar) ShowEvent(msg string) {
@@ -76,20 +81,6 @@ func (sb *statusBar) ShowEvent(msg string) {
 		sb.mu.Unlock()
 	})
 	sb.drawLocked()
-	sb.mu.Unlock()
-}
-
-func (sb *statusBar) IncrementViewers() {
-	sb.mu.Lock()
-	sb.viewerCount++
-	sb.mu.Unlock()
-}
-
-func (sb *statusBar) DecrementViewers() {
-	sb.mu.Lock()
-	if sb.viewerCount > 0 {
-		sb.viewerCount--
-	}
 	sb.mu.Unlock()
 }
 

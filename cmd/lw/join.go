@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -77,39 +79,96 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 		cancel()
 	}()
 
-	probe := &stdoutViewerProbe{out: cmd.ErrOrStderr()}
+	stdinFd := int(os.Stdin.Fd())
+
+	outerCols, outerRows := uint16(80), uint16(24)
+	if ws, err := unix.IoctlGetWinsize(stdinFd, unix.TIOCGWINSZ); err == nil {
+		outerCols = ws.Col
+		outerRows = ws.Row
+	}
+
+	oldTermios, err := setRawMode(stdinFd)
+	if err != nil {
+		return fmt.Errorf("setting raw mode: %w", err)
+	}
+	defer restoreTerminal(stdinFd, oldTermios)
+
+	var sizeSuffix atomic.Value
+	sizeSuffix.Store("")
+
+	bar := newStatusBar(statusBarConfig{
+		out:       os.Stdout,
+		cols:      outerCols,
+		totalRows: outerRows,
+		color:     colorWarningAmber,
+		content: func() string {
+			suffix, _ := sizeSuffix.Load().(string)
+			return "lw | watching " + normalized + suffix
+		},
+	})
+	bar.SetScrollRegion()
+	bar.Draw()
+	defer func() {
+		bar.Close()
+		resetScrollRegion(os.Stdout)
+		clearLine(os.Stdout, outerRows)
+	}()
+
+	probe := &viewerStatusBarProbe{bar: bar}
 	v := viewer.New(relay, []byte(normalized), os.Stdout, probe)
 
-	stderr := cmd.ErrOrStderr()
 	v.SetResizeHandler(func(cols, rows uint16) {
-		ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
-		if err != nil {
+		tryResizeTerminal(stdinFd, cols, outerRows)
+
+		ws, wsErr := unix.IoctlGetWinsize(stdinFd, unix.TIOCGWINSZ)
+		if wsErr != nil {
 			return
 		}
-		if ws.Col < cols || ws.Row < rows {
-			fmt.Fprintf(stderr, "\r[terminal too small — sharer: %d×%d, you: %d×%d]\n",
-				cols, rows, ws.Col, ws.Row)
+		if ws.Col < cols || ws.Row-1 < rows {
+			sizeSuffix.Store(fmt.Sprintf(" [sharer: %d×%d]", cols, rows))
+		} else {
+			sizeSuffix.Store("")
 		}
+		bar.Draw()
 	})
 
 	err = v.Run(ctx)
+
+	restoreTerminal(stdinFd, oldTermios)
+	resetScrollRegion(os.Stdout)
+	clearLine(os.Stdout, outerRows)
 
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, viewer.ErrSessionNotFound):
-		fmt.Fprintln(cmd.ErrOrStderr(), "\rerror: session not found")
+		fmt.Fprintln(cmd.ErrOrStderr(), "error: session not found")
 		return err
 	case errors.Is(err, viewer.ErrHandshakeTimeout):
-		fmt.Fprintln(cmd.ErrOrStderr(), "\rerror: handshake timed out")
+		fmt.Fprintln(cmd.ErrOrStderr(), "error: handshake timed out")
 		return err
 	case errors.Is(err, viewer.ErrSessionEnded):
-		fmt.Fprintln(cmd.OutOrStdout(), "\nsession ended by sharer")
+		fmt.Fprintln(cmd.OutOrStdout(), "session ended by sharer")
 		return nil
 	case errors.Is(err, viewer.ErrConnectionLost):
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nsession lost (connection dropped)")
+		fmt.Fprintln(cmd.ErrOrStderr(), "session lost (connection dropped)")
+		return err
+	case errors.Is(err, viewer.ErrAccessRevoked):
+		fmt.Fprintln(cmd.ErrOrStderr(), "access revoked")
 		return err
 	default:
 		return err
 	}
+}
+
+func tryResizeTerminal(fd int, cols, rows uint16) {
+	fmt.Fprintf(os.Stdout, "\033[8;%d;%dt", rows, cols)
+}
+
+func resetScrollRegion(w io.Writer) {
+	fmt.Fprint(w, "\033[r")
+}
+
+func clearLine(w io.Writer, row uint16) {
+	fmt.Fprintf(w, "\033[%d;1H\033[2K", row)
 }

@@ -80,10 +80,12 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	}
 	defer restoreTerminal(stdinFd, oldTermios)
 
-	bar := newStatusBar(os.Stdout, outerCols, outerRows, pairingCode)
+	probe := newSharerProbe(os.Stdout, outerCols, outerRows, pairingCode)
+	bar := probe.bar
 	bar.SetScrollRegion()
 	bar.Draw()
 	defer func() {
+		bar.Close()
 		resetScrollRegion(os.Stdout)
 		clearLine(os.Stdout, outerRows)
 	}()
@@ -112,7 +114,6 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	probe := &statusBarSharerProbe{bar: bar}
 	sh := sharer.New(sess, relay, []byte(pairingCode), probe)
 
 	sockPath := ipc.SocketPath(os.Getpid())
@@ -192,10 +193,3 @@ func restoreTerminal(fd int, state *unix.Termios) {
 	unix.IoctlSetTermios(fd, unix.TCSETS, state)
 }
 
-func resetScrollRegion(w io.Writer) {
-	fmt.Fprint(w, "\033[r")
-}
-
-func clearLine(w io.Writer, row uint16) {
-	fmt.Fprintf(w, "\033[%d;1H\033[2K", row)
-}
