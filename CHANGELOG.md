@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/jsell-rh/lockwire/compare/v1.0.1...v1.0.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* **ci:** clean up arch-specific container tags after manifest merge ([420c5e4](https://github.com/jsell-rh/lockwire/commit/420c5e46b409829192fc27681b725ce7e89d190f))
+* **relay:** skip WebSocket origin check for reverse proxy support ([d267387](https://github.com/jsell-rh/lockwire/commit/d267387f8ff54d75273b9e8f2c93f03c1a2bb78f))
+
 ## [1.0.1](https://github.com/jsell-rh/lockwire/compare/v1.0.0...v1.0.1) (2026-05-20)
 
 
