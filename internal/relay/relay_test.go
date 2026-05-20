@@ -506,6 +506,56 @@ func TestAPIRoutesWorkWithWebAssets(t *testing.T) {
 	}
 }
 
+func TestWebViewerMissingIndexReturns404(t *testing.T) {
+	assets := fstest.MapFS{
+		"other.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
+	}
+	srv := NewServer(WithWebAssets(assets))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/join")
+	if err != nil {
+		t.Fatalf("GET /join: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestProbeReceivesAcceptError(t *testing.T) {
+	var calls []string
+	probe := &recordingRelayProbe{onAcceptError: func(handler string, err error) {
+		calls = append(calls, handler)
+	}}
+	srv := NewServer(WithProbe(probe))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// A plain HTTP GET to a WebSocket endpoint triggers a websocket.Accept error.
+	resp, err := http.Get(ts.URL + "/api/share/aabbccdd11223344aabbccdd11223344")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	if len(calls) != 1 || calls[0] != "share" {
+		t.Errorf("probe calls = %v, want [share]", calls)
+	}
+}
+
+type recordingRelayProbe struct {
+	onAcceptError func(handler string, err error)
+}
+
+func (p *recordingRelayProbe) AcceptError(handler string, err error) {
+	if p.onAcceptError != nil {
+		p.onAcceptError(handler, err)
+	}
+}
+
 func TestUnicastToNonexistentViewerSilentlyDropped(t *testing.T) {
 	_, ts := startTestServer(t)
 	sid := randomSessionID(t)
