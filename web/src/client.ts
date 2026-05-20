@@ -17,6 +17,7 @@ import {
   CTRL_SESSION_NOT_FOUND,
   CTRL_SESSION_ENDED,
   CTRL_SESSION_FULL,
+  CLIENT_BYTE_BROWSER,
   VIEWER_ID_LEN,
   NONCE_LEN,
   GCM_TAG_LEN,
@@ -108,7 +109,7 @@ export class LockwireClient {
       aad: new TextEncoder().encode(SPAKE2_ASSOCIATED_DATA),
     });
 
-    this.send(new Uint8Array([MSG_TYPE_SPAKE2]));
+    this.send(new Uint8Array([MSG_TYPE_SPAKE2, CLIENT_BYTE_BROWSER]));
 
     const msgA = await this.recvHandshakeMsg();
     const msgB = spake.exchange(msgA);

@@ -48,9 +48,10 @@ const (
 )
 
 type handshakeCtx struct {
-	state    handshakeState
-	spake    *crypto.SPAKEHandshake
-	viewerID string
+	state      handshakeState
+	spake      *crypto.SPAKEHandshake
+	viewerID   string
+	clientType string
 }
 
 func New(sess *session.Session, relay RelayConn, code []byte, probe Probe) *Sharer {
@@ -190,9 +191,10 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 			return fmt.Errorf("creating SPAKE2: %w", err)
 		}
 		hs = &handshakeCtx{
-			state:    hsWaitInit,
-			spake:    spake,
-			viewerID: relayViewerID,
+			state:      hsWaitInit,
+			spake:      spake,
+			viewerID:   relayViewerID,
+			clientType: clientTypeFromByte(payload),
 		}
 		s.handshakes[relayViewerID] = hs
 	}
@@ -240,7 +242,7 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 		}
 		defer crypto.ZeroBytes(authKey)
 
-		info, encPayload, err := s.sess.RegisterViewer(authKey, protocol.ClientTypeCLI)
+		info, encPayload, err := s.sess.RegisterViewer(authKey, hs.clientType)
 		if err != nil {
 			s.cleanupHandshake(relayViewerID)
 			return fmt.Errorf("registering viewer: %w", err)
@@ -252,7 +254,7 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 		}
 
 		hs.state = hsComplete
-		s.probe.ViewerJoined(info.ID, protocol.ClientTypeCLI)
+		s.probe.ViewerJoined(info.ID, hs.clientType)
 
 		s.mu.Lock()
 		cols, rows := s.termCols, s.termRows
@@ -342,6 +344,13 @@ func buildTermSizeFrame(ciphertext, nonce []byte, epoch uint64) []byte {
 	copy(buf[9:9+protocol.NonceLen], nonce)
 	copy(buf[9+protocol.NonceLen:], ciphertext)
 	return buf
+}
+
+func clientTypeFromByte(payload []byte) string {
+	if len(payload) > 0 && payload[0] == protocol.ClientByteBrowser {
+		return protocol.ClientTypeBrowser
+	}
+	return protocol.ClientTypeCLI
 }
 
 func (s *Sharer) heartbeatLoop(ctx context.Context) {

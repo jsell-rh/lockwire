@@ -40,6 +40,7 @@ type Viewer struct {
 	streamKey          []byte
 	authKey            []byte
 	viewerID           string
+	clientTypeByte     byte
 	lastNonce          uint64
 	consecutiveFailures int
 	done               chan struct{}
@@ -48,17 +49,30 @@ type Viewer struct {
 	onResize           func(cols, rows uint16)
 }
 
-func New(relay RelayConn, code []byte, output io.Writer, probe Probe) *Viewer {
+type Option func(*Viewer)
+
+func WithClientType(b byte) Option {
+	return func(v *Viewer) {
+		v.clientTypeByte = b
+	}
+}
+
+func New(relay RelayConn, code []byte, output io.Writer, probe Probe, opts ...Option) *Viewer {
 	if probe == nil {
 		probe = noopProbe{}
 	}
-	return &Viewer{
-		relay:  relay,
-		code:   code,
-		output: output,
-		probe:  probe,
-		done:   make(chan struct{}),
+	v := &Viewer{
+		relay:          relay,
+		code:           code,
+		output:         output,
+		probe:          probe,
+		clientTypeByte: protocol.ClientByteCLI,
+		done:           make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 func (v *Viewer) SetResizeHandler(fn func(cols, rows uint16)) {
@@ -106,8 +120,7 @@ func (v *Viewer) handshake(ctx context.Context) error {
 	}
 	defer spake.Destroy()
 
-	// Send init (empty payload triggers sharer to create SPAKE2 and send msg_a)
-	if err := v.relay.Send(hsCtx, []byte{protocol.MsgTypeSPAKE2}); err != nil {
+	if err := v.relay.Send(hsCtx, []byte{protocol.MsgTypeSPAKE2, v.clientTypeByte}); err != nil {
 		return fmt.Errorf("sending SPAKE2 init: %w", err)
 	}
 

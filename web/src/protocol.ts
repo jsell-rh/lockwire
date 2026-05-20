@@ -30,6 +30,9 @@ export const CTRL_SESSION_ENDED: number = 0x04;
 export const CTRL_SESSION_FULL: number = 0x05;
 export const CTRL_SESSION_ID_CONFLICT: number = 0x06;
 
+export const CLIENT_BYTE_CLI: number = 0x01;
+export const CLIENT_BYTE_BROWSER: number = 0x02;
+
 export const HEARTBEAT_INTERVAL_MS = 5000;
 export const VIEWER_REVOCATION_FAILURE_THRESHOLD = 10;
 

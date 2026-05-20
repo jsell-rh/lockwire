@@ -21,6 +21,10 @@ const (
 	ClientTypeCLI     = "cli"
 	ClientTypeBrowser = "browser"
 
+	// Client type bytes sent in SPAKE2 init payload.
+	ClientByteCLI     byte = 0x01
+	ClientByteBrowser byte = 0x02
+
 	EpochDurationSec    = 60
 	EpochGracePeriodSec = 5
 	ViewerIDCharset     = "abcdefghijklmnopqrstuvwxyz0123456789"

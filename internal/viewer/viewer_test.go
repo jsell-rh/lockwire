@@ -303,6 +303,78 @@ func TestHandshakeAndStreamDecryption(t *testing.T) {
 	}
 }
 
+func TestViewerSendsClientTypeInInit(t *testing.T) {
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClientType(protocol.ClientByteBrowser))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	// Send join ack
+	relay.incoming <- []byte{protocol.MsgTypeControl, protocol.CtrlJoinAck, 'v', '0', '0', '0', '0', '0'}
+
+	// Wait for the viewer's SPAKE2 init message
+	waitForSent(t, relay, 1)
+	sent := relay.getSent()
+	initMsg := sent[0]
+
+	if initMsg[0] != protocol.MsgTypeSPAKE2 {
+		t.Fatalf("expected SPAKE2 type byte, got 0x%02x", initMsg[0])
+	}
+	if len(initMsg) < 2 {
+		t.Fatal("expected client type byte in SPAKE2 init, got only type byte")
+	}
+	if initMsg[1] != protocol.ClientByteBrowser {
+		t.Errorf("client type byte = 0x%02x, want 0x%02x (browser)", initMsg[1], protocol.ClientByteBrowser)
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestViewerDefaultsToCliClientType(t *testing.T) {
+	relay := newFakeRelay()
+	v := New(relay, testCode, &safeBuffer{}, nil)
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	relay.incoming <- []byte{protocol.MsgTypeControl, protocol.CtrlJoinAck, 'v', '0', '0', '0', '0', '0'}
+
+	waitForSent(t, relay, 1)
+	sent := relay.getSent()
+	initMsg := sent[0]
+
+	if len(initMsg) < 2 {
+		t.Fatal("expected client type byte in SPAKE2 init")
+	}
+	if initMsg[1] != protocol.ClientByteCLI {
+		t.Errorf("default client type byte = 0x%02x, want 0x%02x (cli)", initMsg[1], protocol.ClientByteCLI)
+	}
+
+	cancel()
+	<-errCh
+}
+
 func TestSessionNotFound(t *testing.T) {
 	relay := newFakeRelay()
 	v := New(relay, testCode, &safeBuffer{}, nil)

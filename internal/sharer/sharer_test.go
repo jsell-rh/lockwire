@@ -67,11 +67,16 @@ func (f *fakeRelay) sentMessages() [][]byte {
 
 // --- Recording probe ---
 
+type joinEvent struct {
+	id, clientType string
+}
+
 type recordingProbe struct {
 	mu               sync.Mutex
 	sessionsCreated  []string
 	relayConnected   []string
 	viewersJoined    []string
+	viewerJoinEvents []joinEvent
 	viewersLeft      []string
 	framesStreamed   int
 	terminated       []string
@@ -100,6 +105,7 @@ func (p *recordingProbe) ViewerJoined(id, clientType string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.viewersJoined = append(p.viewersJoined, id)
+	p.viewerJoinEvents = append(p.viewerJoinEvents, joinEvent{id, clientType})
 }
 
 func (p *recordingProbe) ViewerLeft(id string) {
@@ -359,6 +365,125 @@ func TestSharerSPAKE2Handshake(t *testing.T) {
 	pw.Close()
 	cancel()
 	<-done
+}
+
+func TestSharerHandshakeRecordsClientType(t *testing.T) {
+	tests := []struct {
+		name       string
+		clientByte []byte
+		wantType   string
+	}{
+		{"cli viewer", []byte{protocol.ClientByteCLI}, protocol.ClientTypeCLI},
+		{"browser viewer", []byte{protocol.ClientByteBrowser}, protocol.ClientTypeBrowser},
+		{"no client byte defaults to cli", nil, protocol.ClientTypeCLI},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sess, err := session.NewSession([]byte("thunder-eagle-river-moon-stone-fire"))
+			if err != nil {
+				t.Fatalf("NewSession: %v", err)
+			}
+			defer sess.Close()
+
+			relay := newFakeRelay()
+			probe := &recordingProbe{}
+			code := []byte("test-client-type")
+
+			sh := New(sess, relay, code, probe)
+
+			pr, pw := io.Pipe()
+			defer pr.Close()
+			defer pw.Close()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			done := make(chan error, 1)
+			go func() {
+				done <- sh.Run(ctx, pr)
+			}()
+			time.Sleep(50 * time.Millisecond)
+
+			relayViewerID := padViewerID("vw1")
+
+			nthUnicast := func(n int) []byte {
+				msgs := relay.sentMessages()
+				count := 0
+				for _, m := range msgs {
+					if len(m) > 0 && m[0] == protocol.MsgTypeUnicast {
+						vid, _ := extractUnicastPayload(m)
+						if vid == relayViewerID {
+							if count == n {
+								return m
+							}
+							count++
+						}
+					}
+				}
+				return nil
+			}
+
+			// Step 1: Viewer sends init with client type byte.
+			relay.incoming <- buildSPAKE2Msg(relayViewerID, tt.clientByte)
+			time.Sleep(50 * time.Millisecond)
+
+			msgAUnicast := nthUnicast(0)
+			if msgAUnicast == nil {
+				t.Fatal("expected sharer to send SPAKE2 msg_a")
+			}
+			_, msgA := extractUnicastPayload(msgAUnicast)
+
+			viewer, err := crypto.NewSPAKE2Viewer(code)
+			if err != nil {
+				t.Fatalf("NewSPAKE2Viewer: %v", err)
+			}
+
+			msgB, err := viewer.Exchange(msgA)
+			if err != nil {
+				t.Fatalf("viewer.Exchange: %v", err)
+			}
+
+			relay.incoming <- buildSPAKE2Msg(relayViewerID, msgB)
+			time.Sleep(50 * time.Millisecond)
+
+			confirmAMsg := nthUnicast(1)
+			if confirmAMsg == nil {
+				t.Fatal("expected confirm_a")
+			}
+			_, confirmA := extractUnicastPayload(confirmAMsg)
+
+			confirmB, err := viewer.Confirm(confirmA)
+			if err != nil {
+				t.Fatalf("viewer.Confirm: %v", err)
+			}
+
+			relay.incoming <- buildSPAKE2Msg(relayViewerID, confirmB)
+			time.Sleep(50 * time.Millisecond)
+
+			// Verify the client type was recorded in the session and probe.
+			viewers := sess.ListViewers()
+			if len(viewers) != 1 {
+				t.Fatalf("expected 1 viewer, got %d", len(viewers))
+			}
+			if viewers[0].ClientType != tt.wantType {
+				t.Errorf("session viewer client type = %q, want %q", viewers[0].ClientType, tt.wantType)
+			}
+
+			probe.mu.Lock()
+			if len(probe.viewerJoinEvents) != 1 {
+				t.Fatalf("expected 1 join event, got %d", len(probe.viewerJoinEvents))
+			}
+			if probe.viewerJoinEvents[0].clientType != tt.wantType {
+				t.Errorf("probe client type = %q, want %q", probe.viewerJoinEvents[0].clientType, tt.wantType)
+			}
+			probe.mu.Unlock()
+
+			pw.Close()
+			cancel()
+			<-done
+		})
+	}
 }
 
 func TestSharerCancelStopsCleanly(t *testing.T) {
