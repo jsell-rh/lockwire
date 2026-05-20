@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,9 @@ func TestRelayRequiresTLSFlags(t *testing.T) {
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error when --tls-cert and --tls-key are missing")
+	}
+	if !strings.Contains(err.Error(), "--self-signed") {
+		t.Errorf("error should mention --self-signed, got: %v", err)
 	}
 }
 
@@ -262,6 +266,169 @@ func TestRelayGracefulShutdown(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("relay did not shut down within 5s")
+	}
+}
+
+func TestRelaySelfSignedConflictsWithTLSCert(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--self-signed", "--tls-cert", "/tmp/cert.pem"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when --self-signed used with --tls-cert")
+	}
+	want := "--self-signed cannot be used with --tls-cert or --tls-key"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want substring %q", err.Error(), want)
+	}
+}
+
+func TestRelaySelfSignedConflictsWithTLSKey(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--self-signed", "--tls-key", "/tmp/key.pem"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when --self-signed used with --tls-key")
+	}
+	want := "--self-signed cannot be used with --tls-cert or --tls-key"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want substring %q", err.Error(), want)
+	}
+}
+
+func TestRelayOnlyTLSCertFails(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--tls-cert", "/tmp/cert.pem"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when only --tls-cert provided")
+	}
+	want := "--tls-cert and --tls-key must be used together"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want substring %q", err.Error(), want)
+	}
+}
+
+func TestRelayOnlyTLSKeyFails(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--tls-key", "/tmp/key.pem"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when only --tls-key provided")
+	}
+	want := "--tls-cert and --tls-key must be used together"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want substring %q", err.Error(), want)
+	}
+}
+
+func TestRelaySelfSignedStartsAndServes(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay", "--self-signed", "--listen", "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addrCh := make(chan string, 1)
+	setRelayAddrNotify(func(addr string) {
+		addrCh <- addr
+	})
+	defer setRelayAddrNotify(nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runRelayWithContext(ctx, root)
+	}()
+
+	var addr string
+	select {
+	case addr = <-addrCh:
+	case err := <-errCh:
+		t.Fatalf("relay exited early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay to start")
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Get("https://" + addr + "/join")
+	if err != nil {
+		t.Fatalf("GET /join: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /join status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("relay returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("relay did not shut down within 5s")
+	}
+}
+
+func TestRelaySelfSignedPrintsFingerprint(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	var stderr bytes.Buffer
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"relay", "--self-signed", "--listen", "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addrCh := make(chan string, 1)
+	setRelayAddrNotify(func(addr string) {
+		addrCh <- addr
+	})
+	defer setRelayAddrNotify(nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runRelayWithContext(ctx, root)
+	}()
+
+	select {
+	case <-addrCh:
+	case err := <-errCh:
+		t.Fatalf("relay exited early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay to start")
+	}
+
+	// Give a moment for stderr output
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-errCh
+
+	output := stderr.String()
+	if !strings.Contains(output, "fingerprint: SHA256:") {
+		t.Errorf("stderr should contain fingerprint, got: %q", output)
+	}
+
+	// Fingerprint must use uppercase hex (spec: AA:BB:CC not aa:bb:cc)
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "fingerprint: SHA256:") {
+			hex := strings.TrimPrefix(line, "fingerprint: SHA256:")
+			if hex != strings.ToUpper(hex) {
+				t.Errorf("fingerprint should use uppercase hex, got: %q", line)
+			}
+		}
+	}
+
+	if !strings.Contains(output, "self-signed") {
+		t.Errorf("stderr should mention self-signed mode, got: %q", output)
 	}
 }
 

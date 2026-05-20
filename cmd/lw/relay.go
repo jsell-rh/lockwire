@@ -40,9 +40,10 @@ func notifyRelayAddr(addr string) {
 
 func newRelayCmd() *cobra.Command {
 	var (
-		listen  string
-		certFile string
-		keyFile  string
+		listen     string
+		certFile   string
+		keyFile    string
+		selfSigned bool
 	)
 
 	cmd := &cobra.Command{
@@ -50,30 +51,55 @@ func newRelayCmd() *cobra.Command {
 		Short:        "Start the relay server",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if certFile == "" || keyFile == "" {
-				return errors.New("--tls-cert and --tls-key are required")
+			if selfSigned && (certFile != "" || keyFile != "") {
+				return errors.New("--self-signed cannot be used with --tls-cert or --tls-key")
+			}
+			if !selfSigned {
+				if certFile == "" && keyFile == "" {
+					return errors.New("--tls-cert and --tls-key are required (or use --self-signed)")
+				}
+				if (certFile == "") != (keyFile == "") {
+					return errors.New("--tls-cert and --tls-key must be used together")
+				}
 			}
 
 			ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
 
-			return startRelay(ctx, listen, certFile, keyFile)
+			if selfSigned {
+				return startRelaySelfSigned(ctx, cmd, listen)
+			}
+			return startRelay(ctx, cmd, listen, certFile, keyFile)
 		},
 	}
 
 	cmd.Flags().StringVar(&listen, "listen", ":8443", "address to listen on")
 	cmd.Flags().StringVar(&certFile, "tls-cert", "", "path to TLS certificate file")
 	cmd.Flags().StringVar(&keyFile, "tls-key", "", "path to TLS private key file")
+	cmd.Flags().BoolVar(&selfSigned, "self-signed", false, "generate a self-signed TLS certificate at startup")
 
 	return cmd
 }
 
-func startRelay(ctx context.Context, listen, certFile, keyFile string) error {
+func startRelay(ctx context.Context, cmd *cobra.Command, listen, certFile, keyFile string) error {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("loading TLS certificate: %w", err)
+		return fmt.Errorf("could not load TLS certificate: %w", err)
 	}
 
+	return serveRelay(ctx, cmd, listen, cert, "")
+}
+
+func startRelaySelfSigned(ctx context.Context, cmd *cobra.Command, listen string) error {
+	cert, fingerprint, err := generateSelfSignedCert(listen)
+	if err != nil {
+		return fmt.Errorf("generating self-signed certificate: %w", err)
+	}
+
+	return serveRelay(ctx, cmd, listen, cert, fingerprint)
+}
+
+func serveRelay(ctx context.Context, cmd *cobra.Command, listen string, cert tls.Certificate, fingerprint string) error {
 	probe := &logRelayProbe{out: os.Stderr}
 
 	rl := relay.NewRateLimiter(relay.DefaultRateLimitConfig(), probe, time.Now)
@@ -94,11 +120,20 @@ func startRelay(ctx context.Context, listen, certFile, keyFile string) error {
 		MinVersion:   tls.VersionTLS12,
 	})
 
+	addr := tlsLn.Addr().String()
+	if fingerprint != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "relay listening on %s (self-signed; use --relay-insecure to connect)\n", addr)
+		fmt.Fprintf(cmd.ErrOrStderr(), "fingerprint: %s\n", fingerprint)
+	} else {
+		fmt.Fprintf(cmd.ErrOrStderr(), "relay listening on %s\n", addr)
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "web viewer at https://%s/join\n", addr)
+
 	httpSrv := &http.Server{
 		Handler: srv,
 	}
 
-	notifyRelayAddr(tlsLn.Addr().String())
+	notifyRelayAddr(addr)
 
 	go func() {
 		<-ctx.Done()
