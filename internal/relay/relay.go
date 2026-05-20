@@ -45,7 +45,7 @@ type Option func(*Server)
 func WithWebAssets(assets fs.FS) Option {
 	return func(s *Server) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data, err := fs.ReadFile(assets, "index.html")
+			data, err := fs.ReadFile(assets, "dist/index.html")
 			if err != nil {
 				http.NotFound(w, r)
 				return

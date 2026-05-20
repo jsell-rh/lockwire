@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lockwire</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#1a1a2e;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif}
+body{display:flex;align-items:center;justify-content:center}
+
+.container{width:100%;max-width:480px;padding:2rem}
+h1{font-size:1.5rem;font-weight:600;margin-bottom:1.5rem;color:#fff}
+.form-group{display:flex;gap:0.5rem;margin-bottom:1rem}
+
+#code{
+  flex:1;padding:0.75rem 1rem;font-size:1rem;font-family:monospace;
+  background:#16213e;border:1px solid #0f3460;border-radius:6px;color:#e0e0e0;
+  outline:none;transition:border-color 0.2s
+}
+#code:focus{border-color:#e94560}
+
+#watch{
+  padding:0.75rem 1.5rem;font-size:1rem;font-weight:600;
+  background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer;
+  transition:opacity 0.2s
+}
+#watch:hover{opacity:0.9}
+#watch:disabled{opacity:0.5;cursor:not-allowed}
+
+#status{font-size:0.875rem;color:#888;min-height:1.25rem}
+#status.error{color:#e94560}
+
+#terminal-container{
+  position:fixed;inset:0;display:none;background:#000
+}
+#terminal-container.visible{display:block}
+
+.overlay{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,0.8);color:#fff;font-size:1.25rem;z-index:10;
+  display:none
+}
+.overlay.visible{display:flex}
+
+.size-banner{
+  position:fixed;top:0;left:0;right:0;padding:0.25rem 0.5rem;
+  background:#e94560;color:#fff;font-size:0.75rem;text-align:center;
+  z-index:5;display:none
+}
+.size-banner.visible{display:block}
+</style>
+</head>
+<body>
+<div class="container" id="pre-join">
+  <h1>Lockwire</h1>
+  <div class="form-group">
+    <input type="text" id="code" placeholder="enter code" autocomplete="off" spellcheck="false">
+    <button id="watch">Watch</button>
+  </div>
+  <div id="status"></div>
+</div>
+<div id="terminal-container"></div>
+<div class="overlay" id="overlay"><span id="overlay-msg"></span></div>
+<div class="size-banner" id="size-banner"></div>
+
+<script>
+/* __BUNDLE__ */
+</script>
+</body>
+</html>

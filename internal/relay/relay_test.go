@@ -409,7 +409,7 @@ func TestInvalidSessionIDRejected(t *testing.T) {
 
 func TestWebViewerServedAtJoin(t *testing.T) {
 	assets := fstest.MapFS{
-		"index.html": &fstest.MapFile{
+		"dist/index.html": &fstest.MapFile{
 			Data: []byte(`<!DOCTYPE html><html><body><input id="code"><button id="watch">Watch</button></body></html>`),
 		},
 	}
@@ -443,7 +443,7 @@ func TestWebViewerServedAtJoin(t *testing.T) {
 
 func TestWebViewerServedAtRoot(t *testing.T) {
 	assets := fstest.MapFS{
-		"index.html": &fstest.MapFile{
+		"dist/index.html": &fstest.MapFile{
 			Data: []byte(`<!DOCTYPE html><html><body>lockwire</body></html>`),
 		},
 	}
@@ -485,7 +485,7 @@ func TestWebViewerNotServedWithoutAssets(t *testing.T) {
 
 func TestAPIRoutesWorkWithWebAssets(t *testing.T) {
 	assets := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
+		"dist/index.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
 	}
 	srv := NewServer(WithWebAssets(assets))
 	ts := httptest.NewServer(srv)
@@ -508,7 +508,7 @@ func TestAPIRoutesWorkWithWebAssets(t *testing.T) {
 
 func TestWebViewerMissingIndexReturns404(t *testing.T) {
 	assets := fstest.MapFS{
-		"other.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
+		"dist/other.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
 	}
 	srv := NewServer(WithWebAssets(assets))
 	ts := httptest.NewServer(srv)

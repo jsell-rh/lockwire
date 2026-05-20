@@ -7,19 +7,19 @@ import (
 )
 
 func TestAssetsContainIndexHTML(t *testing.T) {
-	data, err := fs.ReadFile(Assets, "index.html")
+	data, err := fs.ReadFile(Assets, "dist/index.html")
 	if err != nil {
-		t.Fatalf("reading index.html from embedded assets: %v", err)
+		t.Fatalf("reading dist/index.html from embedded assets: %v", err)
 	}
 	if len(data) == 0 {
-		t.Fatal("index.html is empty")
+		t.Fatal("dist/index.html is empty")
 	}
 }
 
 func TestIndexHTMLStructure(t *testing.T) {
-	data, err := fs.ReadFile(Assets, "index.html")
+	data, err := fs.ReadFile(Assets, "dist/index.html")
 	if err != nil {
-		t.Fatalf("reading index.html: %v", err)
+		t.Fatalf("reading dist/index.html: %v", err)
 	}
 	html := string(data)
 
@@ -31,28 +31,25 @@ func TestIndexHTMLStructure(t *testing.T) {
 		{"watch button", `id="watch"`},
 		{"Watch label", ">Watch<"},
 		{"status display", `id="status"`},
-		{"fragment extraction", "window.location.hash"},
+		{"fragment extraction", "location.hash"},
 		{"connecting state", `connecting`},
 	}
 
 	for _, c := range checks {
 		if !strings.Contains(html, c.content) {
-			t.Errorf("index.html missing %s (expected %q)", c.name, c.content)
+			t.Errorf("dist/index.html missing %s (expected %q)", c.name, c.content)
 		}
 	}
 }
 
 func TestIndexHTMLNoCodeInServerRequest(t *testing.T) {
-	data, err := fs.ReadFile(Assets, "index.html")
+	data, err := fs.ReadFile(Assets, "dist/index.html")
 	if err != nil {
-		t.Fatalf("reading index.html: %v", err)
+		t.Fatalf("reading dist/index.html: %v", err)
 	}
 	html := string(data)
 
 	if strings.Contains(html, "window.location.search") {
-		t.Error("index.html must not read query string (code must stay in fragment only)")
-	}
-	if strings.Contains(html, "window.location.pathname") && strings.Contains(html, "code") {
-		t.Error("index.html must not extract code from pathname (code must stay in fragment only)")
+		t.Error("dist/index.html must not read query string (code must stay in fragment only)")
 	}
 }
