@@ -98,6 +98,33 @@ Use `--relay-insecure` with self-signed certs. For production, provide your own 
 lw relay --tls-cert cert.pem --tls-key key.pem
 ```
 
+### Behind a reverse proxy (Cloudflare, nginx, etc.)
+
+The relay rate-limits per client IP. Behind a reverse proxy, all connections appear to come from the proxy's IP unless you tell the relay which proxies to trust.
+
+Use `--trusted-proxy` with the CIDR range of your proxy. The relay will read the real client IP from `CF-Connecting-IP` or `X-Forwarded-For` headers, but only when the TCP connection comes from a trusted source. Untrusted sources cannot spoof their IP.
+
+**Cloudflare Tunnel (sidecar)** -- the recommended setup. Run `cloudflared` as a sidecar in the same pod so traffic arrives from localhost:
+
+```
+lw relay --self-signed --trusted-proxy 127.0.0.0/8
+```
+
+**Cloudflare Tunnel (separate machine/pod)** -- use the subnet or the specific IP of the machine running `cloudflared`:
+
+```
+lw relay --self-signed --trusted-proxy 10.0.0.0/8
+```
+
+**nginx on the same host:**
+
+```
+lw relay --tls-cert cert.pem --tls-key key.pem --trusted-proxy 127.0.0.0/8
+```
+
+> [!WARNING]
+> If `--trusted-proxy` doesn't match the actual source IP of your proxy, forwarded headers are ignored and all clients rate-limit as one IP. Check your proxy's network path if rate limiting seems wrong.
+
 ## How it works
 
 1. `lw share` generates a random six-word code and derives a session ID from it using Argon2id
