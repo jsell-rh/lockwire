@@ -1,0 +1,5 @@
+FROM registry.access.redhat.com/hi/core-runtime:latest
+ARG BINARY=lw
+COPY ${BINARY} /lw
+EXPOSE 8443
+ENTRYPOINT ["/lw", "relay", "--self-signed"]

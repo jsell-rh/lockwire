@@ -24,45 +24,7 @@ jobs:
         with:
           release-type: go
 
-  container:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    env:
-      IMAGE: ghcr.io/${{ github.repository }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push multi-arch image
-        id: push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Containerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          build-args: |
-            VERSION=${{ needs.release-please.outputs.tag_name }}
-          tags: |
-            ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }}
-            ${{ env.IMAGE }}:latest
-
-      - name: Attest image
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
-
-  binaries:
+  build:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
@@ -113,3 +75,77 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: lw-${{ matrix.goos }}-${{ matrix.goarch }}
+
+      - name: Upload artifact for container build
+        if: matrix.goos == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lw-${{ matrix.goarch }}
+          path: lw-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  container:
+    needs: [release-please, build]
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lw-amd64
+          path: bin/amd64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lw-arm64
+          path: bin/arm64
+
+      - name: Prepare binaries
+        run: |
+          chmod +x bin/amd64/* bin/arm64/*
+          mv bin/amd64/lw-linux-amd64 bin/amd64/lw
+          mv bin/arm64/lw-linux-arm64 bin/arm64/lw
+
+      - name: Build and push amd64
+        id: amd64
+        uses: docker/build-push-action@v6
+        with:
+          context: bin/amd64
+          file: Containerfile.runtime
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }}-amd64
+
+      - name: Build and push arm64
+        id: arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: bin/arm64
+          file: Containerfile.runtime
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }}-arm64
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }} \
+            -t ${{ env.IMAGE }}:latest \
+            ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }}-amd64 \
+            ${{ env.IMAGE }}:${{ needs.release-please.outputs.version }}-arm64
+
+      - name: Attest image
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.amd64.outputs.digest }}
+          push-to-registry: true
