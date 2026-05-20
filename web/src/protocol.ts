@@ -14,6 +14,7 @@ export const SESSION_ID_ARGON_MEMORY = 64 * 1024;
 export const SESSION_ID_ARGON_THREADS = 1;
 
 export const EPOCH_DURATION_SEC = 60;
+export const EPOCH_GRACE_PERIOD_MS = 5000;
 
 export const MSG_TYPE_SPAKE2: number = 0x01;
 export const MSG_TYPE_STREAM: number = 0x02;

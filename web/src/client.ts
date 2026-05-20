@@ -25,6 +25,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   VIEWER_REVOCATION_FAILURE_THRESHOLD,
   SPAKE2_ASSOCIATED_DATA,
+  EPOCH_GRACE_PERIOD_MS,
 } from "./protocol.js";
 
 export type ConnectionState =
@@ -52,6 +53,9 @@ export class LockwireClient {
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private state: ConnectionState = "pre-join";
   private readonly callbacks: ViewerCallbacks;
+  private currentEpoch = 0n;
+  private epochTransitionTime = 0;
+  private epochInitialized = false;
 
   constructor(callbacks: ViewerCallbacks) {
     this.callbacks = callbacks;
@@ -266,6 +270,9 @@ export class LockwireClient {
       frame.byteLength,
     );
     const epoch = view.getBigUint64(1, false);
+
+    if (!this.validateEpoch(epoch)) return;
+
     const nonce = frame.slice(9, 9 + NONCE_LEN);
     const ciphertext = frame.slice(9 + NONCE_LEN);
 
@@ -299,6 +306,9 @@ export class LockwireClient {
       frame.byteLength,
     );
     const epoch = view.getBigUint64(1, false);
+
+    if (!this.validateEpoch(epoch)) return;
+
     const nonce = frame.slice(9, 9 + NONCE_LEN);
     const ciphertext = frame.slice(9 + NONCE_LEN);
 
@@ -339,6 +349,29 @@ export class LockwireClient {
     } catch {
       // not a valid rekey
     }
+  }
+
+  private validateEpoch(epoch: bigint): boolean {
+    const now = Date.now();
+    if (!this.epochInitialized) {
+      this.currentEpoch = epoch;
+      this.epochTransitionTime = now;
+      this.epochInitialized = true;
+      return true;
+    }
+    if (epoch >= this.currentEpoch) {
+      if (epoch > this.currentEpoch) {
+        this.currentEpoch = epoch;
+        this.epochTransitionTime = now;
+      }
+      return true;
+    }
+    if (epoch === this.currentEpoch - 1n) {
+      if (now - this.epochTransitionTime <= EPOCH_GRACE_PERIOD_MS) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private sendSPAKE2(payload: Uint8Array): void {
