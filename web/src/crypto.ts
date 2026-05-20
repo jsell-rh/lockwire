@@ -56,13 +56,16 @@ export async function deriveEpochKey(
     KEY_LEN * 8,
   );
 
-  return crypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     "raw",
     epochKeyBits,
     { name: "AES-GCM" },
     false,
     ["decrypt"],
   );
+
+  new Uint8Array(epochKeyBits).fill(0);
+  return key;
 }
 
 export async function deriveEpochKeyRaw(
