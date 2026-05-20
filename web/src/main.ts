@@ -37,15 +37,19 @@ import { LockwireClient, type ConnectionState } from "./client.js";
     termContainer.classList.add("visible");
   }
 
-  function updateSizeBanner(
-    sharerCols: number,
-    sharerRows: number,
-  ): void {
-    if (!term) return;
-    if (sharerCols > term.cols || sharerRows > term.rows) {
+  let sharerCols = 0;
+  let sharerRows = 0;
+
+  function updateSizeBanner(): void {
+    if (!term || sharerCols === 0) return;
+    const charWidth = 9;
+    const charHeight = 17;
+    const viewCols = Math.floor(window.innerWidth / charWidth);
+    const viewRows = Math.floor(window.innerHeight / charHeight);
+    if (sharerCols > viewCols || sharerRows > viewRows) {
       sizeBanner.textContent =
-        `Terminal size mismatch: sharer ${sharerCols}x${sharerRows}, ` +
-        `viewer ${term.cols}x${term.rows}`;
+        `[terminal too small — sharer: ${sharerCols}×${sharerRows}, ` +
+        `you: ${viewCols}×${viewRows}]`;
       sizeBanner.classList.add("visible");
     } else {
       sizeBanner.classList.remove("visible");
@@ -88,7 +92,7 @@ import { LockwireClient, type ConnectionState } from "./client.js";
       cursorBlink: false,
       disableStdin: true,
       convertEol: false,
-      scrollback: 1000,
+      scrollback: 5000,
       theme: {
         background: "#1a1a2e",
         foreground: "#e0e0e0",
@@ -98,18 +102,26 @@ import { LockwireClient, type ConnectionState } from "./client.js";
 
     t.open(termContainer);
 
-    const fitToWindow = (): void => {
-      const charWidth = 9;
-      const charHeight = 17;
-      const cols = Math.floor(window.innerWidth / charWidth);
-      const rows = Math.floor(window.innerHeight / charHeight);
-      if (cols > 0 && rows > 0) {
-        t.resize(cols, rows);
+    t.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
+      if (event.type !== "keydown") return true;
+      switch (event.key) {
+        case "Home":
+          t.scrollToTop();
+          return false;
+        case "End":
+          t.scrollToBottom();
+          return false;
+        case "PageUp":
+          t.scrollPages(-1);
+          return false;
+        case "PageDown":
+          t.scrollPages(1);
+          return false;
       }
-    };
+      return true;
+    });
 
-    fitToWindow();
-    window.addEventListener("resize", fitToWindow);
+    window.addEventListener("resize", updateSizeBanner);
 
     return t;
   }
@@ -136,8 +148,10 @@ import { LockwireClient, type ConnectionState } from "./client.js";
       },
       onTerminalResize(cols: number, rows: number): void {
         if (term) {
+          sharerCols = cols;
+          sharerRows = rows;
           term.resize(cols, rows);
-          updateSizeBanner(cols, rows);
+          updateSizeBanner();
         }
       },
     });
