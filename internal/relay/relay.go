@@ -33,12 +33,13 @@ type session struct {
 }
 
 type Server struct {
-	mu          sync.Mutex
-	sessions    map[string]*session
-	maxViewers  int
-	mux         *http.ServeMux
-	probe       Probe
-	rateLimiter *RateLimiter
+	mu            sync.Mutex
+	sessions      map[string]*session
+	maxViewers    int
+	mux           *http.ServeMux
+	probe         Probe
+	rateLimiter   *RateLimiter
+	trustedProxies []*net.IPNet
 }
 
 type Option func(*Server)
@@ -63,6 +64,18 @@ func WithWebAssets(assets fs.FS, version string) Option {
 func WithProbe(p Probe) Option {
 	return func(s *Server) {
 		s.probe = p
+	}
+}
+
+func WithTrustedProxies(cidrs []string) Option {
+	return func(s *Server) {
+		for _, cidr := range cidrs {
+			_, network, err := net.ParseCIDR(cidr)
+			if err != nil {
+				continue
+			}
+			s.trustedProxies = append(s.trustedProxies, network)
+		}
 	}
 }
 
@@ -94,7 +107,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) rateLimitWrap(next http.HandlerFunc, event EventType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.rateLimiter != nil {
-			ip := extractIP(r)
+			ip := s.extractIP(r)
 			if s.rateLimiter.IsBanned(ip) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
@@ -108,11 +121,30 @@ func (s *Server) rateLimitWrap(next http.HandlerFunc, event EventType) http.Hand
 	}
 }
 
-func extractIP(r *http.Request) string {
+func (s *Server) extractIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
+
+	if len(s.trustedProxies) > 0 {
+		srcIP := net.ParseIP(host)
+		if srcIP != nil {
+			for _, cidr := range s.trustedProxies {
+				if cidr.Contains(srcIP) {
+					if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
+						return cfIP
+					}
+					if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+						parts := strings.Split(xff, ",")
+						return strings.TrimSpace(parts[0])
+					}
+					break
+				}
+			}
+		}
+	}
+
 	return host
 }
 
