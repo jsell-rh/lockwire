@@ -114,7 +114,7 @@ func (s *Sharer) Revoke(ctx context.Context, viewerID string) error {
 		}
 	}
 
-	s.probe.ViewerLeft(viewerID)
+	s.probe.ViewerRevoked(viewerID)
 	return nil
 }
 

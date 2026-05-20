@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -60,19 +61,39 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		shell = "/bin/sh"
 	}
 
-	initSize := lwpty.Size{Cols: 80, Rows: 24}
-	if ws, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ); err == nil {
-		initSize.Cols = ws.Col
-		initSize.Rows = ws.Row
+	stdinFd := int(os.Stdin.Fd())
+
+	outerCols, outerRows := uint16(80), uint16(24)
+	if ws, err := unix.IoctlGetWinsize(stdinFd, unix.TIOCGWINSZ); err == nil {
+		outerCols = ws.Col
+		outerRows = ws.Row
 	}
 
-	term, err := lwpty.Start([]string{shell}, initSize, nil)
+	ptyCols, ptyRows := outerCols, outerRows-1
+	if outerRows < 3 {
+		ptyRows = outerRows
+	}
+
+	oldTermios, err := setRawMode(stdinFd)
+	if err != nil {
+		return fmt.Errorf("setting raw mode: %w", err)
+	}
+	defer restoreTerminal(stdinFd, oldTermios)
+
+	bar := newStatusBar(os.Stdout, outerCols, outerRows, pairingCode)
+	bar.SetScrollRegion()
+	bar.Draw()
+	defer func() {
+		resetScrollRegion(os.Stdout)
+		clearLine(os.Stdout, outerRows)
+	}()
+
+	term, err := lwpty.Start([]string{shell}, lwpty.Size{Cols: ptyCols, Rows: ptyRows}, nil)
 	if err != nil {
 		return fmt.Errorf("starting terminal: %w", err)
 	}
 	defer term.Close()
 
-	// Forward stdin to the PTY.
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -86,10 +107,12 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		}
 	}()
 
+	tee := io.TeeReader(term, os.Stdout)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	probe := &stdoutSharerProbe{out: cmd.ErrOrStderr()}
+	probe := &statusBarSharerProbe{bar: bar}
 	sh := sharer.New(sess, relay, []byte(pairingCode), probe)
 
 	sockPath := ipc.SocketPath(os.Getpid())
@@ -101,18 +124,24 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	defer ipcSrv.Close()
 	go ipcSrv.Serve()
 
-	_ = sh.SetTermSize(ctx, initSize.Cols, initSize.Rows)
+	_ = sh.SetTermSize(ctx, ptyCols, ptyRows)
 
 	sigwinch := make(chan os.Signal, 1)
 	signal.Notify(sigwinch, syscall.SIGWINCH)
 	go func() {
 		for range sigwinch {
-			ws, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
+			ws, err := unix.IoctlGetWinsize(stdinFd, unix.TIOCGWINSZ)
 			if err != nil {
 				continue
 			}
-			term.Resize(ws.Col, ws.Row)
-			sh.SetTermSize(ctx, ws.Col, ws.Row)
+			newCols, newRows := ws.Col, ws.Row
+			newPtyRows := newRows - 1
+			if newRows < 3 {
+				newPtyRows = newRows
+			}
+			term.Resize(newCols, newPtyRows)
+			sh.SetTermSize(ctx, newCols, newPtyRows)
+			bar.Resize(newCols, newRows)
 		}
 	}()
 
@@ -123,7 +152,7 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		cancel()
 	}()
 
-	return sh.Run(ctx, term)
+	return sh.Run(ctx, tee)
 }
 
 func buildWatchURL(relayURL, pairingCode string) string {
@@ -136,4 +165,37 @@ func buildWatchURL(relayURL, pairingCode string) string {
 		scheme = "http"
 	}
 	return scheme + "://" + u.Host + u.Path + "/join#" + pairingCode
+}
+
+func setRawMode(fd int) (*unix.Termios, error) {
+	termios, err := unix.IoctlGetTermios(fd, unix.TCGETS)
+	if err != nil {
+		return nil, fmt.Errorf("getting terminal attributes: %w", err)
+	}
+	old := *termios
+
+	termios.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
+	termios.Oflag &^= unix.OPOST
+	termios.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
+	termios.Cflag &^= unix.CSIZE | unix.PARENB
+	termios.Cflag |= unix.CS8
+	termios.Cc[unix.VMIN] = 1
+	termios.Cc[unix.VTIME] = 0
+
+	if err := unix.IoctlSetTermios(fd, unix.TCSETS, termios); err != nil {
+		return nil, fmt.Errorf("setting raw mode: %w", err)
+	}
+	return &old, nil
+}
+
+func restoreTerminal(fd int, state *unix.Termios) {
+	unix.IoctlSetTermios(fd, unix.TCSETS, state)
+}
+
+func resetScrollRegion(w io.Writer) {
+	fmt.Fprint(w, "\033[r")
+}
+
+func clearLine(w io.Writer, row uint16) {
+	fmt.Fprintf(w, "\033[%d;1H\033[2K", row)
 }

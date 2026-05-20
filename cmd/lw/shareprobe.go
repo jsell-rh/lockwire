@@ -1,30 +1,33 @@
 package main
 
-import (
-	"fmt"
-	"io"
-)
+import "fmt"
 
-type stdoutSharerProbe struct {
-	out io.Writer
+type statusBarSharerProbe struct {
+	bar *statusBar
 }
 
-func (p *stdoutSharerProbe) SessionCreated(sessionID, code string)    {}
-func (p *stdoutSharerProbe) RelayConnected(url string)                {}
-func (p *stdoutSharerProbe) FrameStreamed(epoch uint64, size int)      {}
-func (p *stdoutSharerProbe) SessionTerminated(reason string)          {}
-func (p *stdoutSharerProbe) HeartbeatSent()                           {}
+func (p *statusBarSharerProbe) SessionCreated(sessionID, code string)    {}
+func (p *statusBarSharerProbe) RelayConnected(url string)                {}
+func (p *statusBarSharerProbe) FrameStreamed(epoch uint64, size int)      {}
+func (p *statusBarSharerProbe) SessionTerminated(reason string)          {}
+func (p *statusBarSharerProbe) HeartbeatSent()                           {}
+func (p *statusBarSharerProbe) TerminalSizeBroadcast(uint16, uint16)     {}
 
-func (p *stdoutSharerProbe) ViewerJoined(viewerID, clientType string) {
-	fmt.Fprintf(p.out, "viewer joined: %s (%s)\n", viewerID, clientType)
+func (p *statusBarSharerProbe) ViewerJoined(viewerID, clientType string) {
+	p.bar.IncrementViewers()
+	p.bar.ShowEvent(fmt.Sprintf("viewer joined: %s (%s)", viewerID, clientType))
 }
 
-func (p *stdoutSharerProbe) ViewerLeft(viewerID string) {
-	fmt.Fprintf(p.out, "viewer left: %s\n", viewerID)
+func (p *statusBarSharerProbe) ViewerLeft(viewerID string) {
+	p.bar.DecrementViewers()
+	p.bar.ShowEvent(fmt.Sprintf("viewer left: %s", viewerID))
 }
 
-func (p *stdoutSharerProbe) HandshakeFailed(viewerID string, err error) {
-	fmt.Fprintf(p.out, "handshake failed for viewer %s\n", viewerID)
+func (p *statusBarSharerProbe) ViewerRevoked(viewerID string) {
+	p.bar.DecrementViewers()
+	p.bar.ShowEvent(fmt.Sprintf("revoked: %s", viewerID))
 }
 
-func (p *stdoutSharerProbe) TerminalSizeBroadcast(uint16, uint16) {}
+func (p *statusBarSharerProbe) HandshakeFailed(viewerID string, err error) {
+	p.bar.ShowEvent(fmt.Sprintf("handshake failed: %s", viewerID))
+}

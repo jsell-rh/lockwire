@@ -78,6 +78,7 @@ type recordingProbe struct {
 	viewersJoined    []string
 	viewerJoinEvents []joinEvent
 	viewersLeft      []string
+	viewersRevoked   []string
 	framesStreamed   int
 	terminated       []string
 	handshakeFailed  []string
@@ -112,6 +113,12 @@ func (p *recordingProbe) ViewerLeft(id string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.viewersLeft = append(p.viewersLeft, id)
+}
+
+func (p *recordingProbe) ViewerRevoked(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.viewersRevoked = append(p.viewersRevoked, id)
 }
 
 func (p *recordingProbe) FrameStreamed(epoch uint64, size int) {
@@ -635,8 +642,8 @@ func TestSharerRevokeRemovesViewerAndSendsRekey(t *testing.T) {
 	}
 
 	probe.mu.Lock()
-	if len(probe.viewersLeft) != 1 || probe.viewersLeft[0] != infoA.ID {
-		t.Errorf("expected ViewerLeft for %s, got %v", infoA.ID, probe.viewersLeft)
+	if len(probe.viewersRevoked) != 1 || probe.viewersRevoked[0] != infoA.ID {
+		t.Errorf("expected ViewerRevoked for %s, got %v", infoA.ID, probe.viewersRevoked)
 	}
 	probe.mu.Unlock()
 
