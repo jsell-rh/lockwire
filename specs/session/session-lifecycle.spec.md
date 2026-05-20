@@ -161,7 +161,7 @@ The status bar SHALL be rendered with black text on a Cyber Cyan (`#00F0FF`) bac
 #### Scenario: Status bar steady state
 - GIVEN a session is active with two Viewers
 - WHEN no viewer event has occurred in the last 5 seconds
-- THEN the status bar displays: `lw | code: <truncated-code> | <N> viewers`
+- THEN the status bar displays: `lw | code: <truncated-code> | <N> viewers | lw stop to end`
 - AND the bar spans the full terminal width, padded with spaces
 
 #### Scenario: Status bar viewer event

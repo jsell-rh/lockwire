@@ -133,6 +133,27 @@ The system SHALL revoke a specific Viewer's access from the active local session
 
 ---
 
+### Requirement: `lw stop`
+
+The system SHALL allow the Sharer to terminate the active session by running `lw stop` from any terminal on the same machine. The command communicates with the running `lw share` process via the control socket.
+
+To ensure `lw stop` is always available from within the shared session, `lw share` SHALL prepend the directory containing the `lw` binary to `PATH` in the spawned shell's environment. This way, even if the user installed `lw` in a non-standard location, the command is discoverable inside the shared session.
+
+#### Scenario: Stop active session
+- GIVEN a `lw share` process is running
+- WHEN the Sharer runs `lw stop`
+- THEN the command sends a stop request to the `lw share` process via Unix socket
+- AND `session stopped` is printed to stdout
+- AND the `lw share` process terminates cleanly (zeroing keys, notifying viewers)
+
+#### Scenario: No session active
+- GIVEN no `lw share` process is running
+- WHEN a user runs `lw stop`
+- THEN the process exits with status 1
+- AND `error: no active session` is printed to stderr
+
+---
+
 ### Requirement: `--relay` Flag
 
 The `--relay` flag SHALL accept a WebSocket URL with the following constraints:
