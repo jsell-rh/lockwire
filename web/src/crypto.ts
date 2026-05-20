@@ -11,6 +11,10 @@ import {
   AUTH_KEY_INFO,
 } from "./protocol.js";
 
+function toBuffer(data: Uint8Array): ArrayBuffer {
+  return new Uint8Array(data).buffer as ArrayBuffer;
+}
+
 export async function deriveSessionID(code: Uint8Array): Promise<string> {
   return argon2id({
     password: code,
@@ -35,7 +39,7 @@ export async function deriveEpochKey(
 
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    streamKey,
+    toBuffer(streamKey),
     "HKDF",
     false,
     ["deriveBits"],
@@ -45,8 +49,8 @@ export async function deriveEpochKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(0),
-      info,
+      salt: new ArrayBuffer(0),
+      info: toBuffer(info),
     },
     baseKey,
     KEY_LEN * 8,
@@ -73,7 +77,7 @@ export async function deriveEpochKeyRaw(
 
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    streamKey,
+    toBuffer(streamKey),
     "HKDF",
     false,
     ["deriveBits"],
@@ -83,8 +87,8 @@ export async function deriveEpochKeyRaw(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(0),
-      info,
+      salt: new ArrayBuffer(0),
+      info: toBuffer(info),
     },
     baseKey,
     KEY_LEN * 8,
@@ -96,7 +100,7 @@ export async function deriveEpochKeyRaw(
 export async function deriveAuthKey(spakeSecret: Uint8Array): Promise<Uint8Array> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    spakeSecret,
+    toBuffer(spakeSecret),
     "HKDF",
     false,
     ["deriveBits"],
@@ -106,8 +110,8 @@ export async function deriveAuthKey(spakeSecret: Uint8Array): Promise<Uint8Array
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new Uint8Array(0),
-      info: new TextEncoder().encode(AUTH_KEY_INFO),
+      salt: new ArrayBuffer(0),
+      info: toBuffer(new TextEncoder().encode(AUTH_KEY_INFO)),
     },
     baseKey,
     KEY_LEN * 8,
@@ -126,9 +130,9 @@ export async function aesGcmDecrypt(
   }
 
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: nonce, tagLength: 128 },
+    { name: "AES-GCM", iv: toBuffer(nonce), tagLength: 128 },
     key,
-    ciphertext,
+    toBuffer(ciphertext),
   );
 
   return new Uint8Array(plaintext);
@@ -145,7 +149,7 @@ export async function aesGcmDecryptRaw(
 
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key,
+    toBuffer(key),
     { name: "AES-GCM" },
     false,
     ["decrypt"],
