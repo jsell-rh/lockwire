@@ -11,7 +11,13 @@ const (
 	colorCyberCyan   = "\033[30;48;2;0;240;255m"
 	colorWarningAmber = "\033[30;48;2;255;176;0m"
 	colorReset       = "\033[0m"
+	boldOn           = "\033[1m"
+	boldOff          = "\033[22m"
 )
+
+func bold(s string) string {
+	return boldOn + s + boldOff
+}
 
 type statusBar struct {
 	mu          sync.Mutex
@@ -113,14 +119,34 @@ func (bw *barRedrawWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func padOrTruncate(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
+func visibleLen(s string) int {
+	n := 0
+	inEsc := false
+	for _, c := range s {
+		if c == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if c == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		n++
 	}
-	buf := make([]byte, width)
-	copy(buf, s)
-	for i := len(s); i < width; i++ {
+	return n
+}
+
+func padOrTruncate(s string, width int) string {
+	vLen := visibleLen(s)
+	if vLen >= width {
+		return s
+	}
+	padding := width - vLen
+	buf := make([]byte, padding)
+	for i := range buf {
 		buf[i] = ' '
 	}
-	return string(buf)
+	return s + string(buf)
 }

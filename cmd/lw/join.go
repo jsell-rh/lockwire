@@ -103,7 +103,7 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 		color:     colorWarningAmber,
 		content: func() string {
 			suffix, _ := sizeSuffix.Load().(string)
-			return "lw | watching " + normalized + suffix + " | Ctrl+C to quit"
+			return "lw | watching " + bold(normalized) + suffix + " | Ctrl+C to quit"
 		},
 	})
 	fmt.Fprint(os.Stdout, "\033[2J\033[H")
