@@ -1,11 +1,12 @@
 import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { SPAKE2Client, SPAKE2Server } from "./spake2.js";
+import { SPAKE2_ASSOCIATED_DATA } from "./protocol.js";
 
 const enc = new TextEncoder();
 
 function aad(): Uint8Array {
-  return enc.encode("lockwire-v1");
+  return enc.encode(SPAKE2_ASSOCIATED_DATA);
 }
 
 describe("SPAKE2", () => {
@@ -59,8 +60,8 @@ describe("SPAKE2", () => {
 });
 
 function completeSPAKE2(code: Uint8Array): Uint8Array {
-  const client = new SPAKE2Client(code, { aad: enc.encode("lockwire-v1") });
-  const server = new SPAKE2Server(code, { aad: enc.encode("lockwire-v1") });
+  const client = new SPAKE2Client(code, { aad: enc.encode(SPAKE2_ASSOCIATED_DATA) });
+  const server = new SPAKE2Server(code, { aad: enc.encode(SPAKE2_ASSOCIATED_DATA) });
 
   const msgA = client.start();
   const msgB = server.exchange(msgA);

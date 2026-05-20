@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { SPAKE2Client, SPAKE2Server } from "./spake2.js";
+import { SPAKE2_ASSOCIATED_DATA } from "./protocol.js";
 
 const enc = new TextEncoder();
 const CWD = "/home/jsell/code/lockwire";
@@ -80,7 +81,7 @@ describe("SPAKE2 Go ↔ TypeScript interop", () => {
 
     const msgAHex = await go.readLine();
     const server = new SPAKE2Server(enc.encode(code), {
-      aad: enc.encode("lockwire-v1"),
+      aad: enc.encode(SPAKE2_ASSOCIATED_DATA),
     });
     const msgB = server.exchange(hexToBytes(msgAHex));
     go.write(bytesToHex(msgB));
@@ -102,7 +103,7 @@ describe("SPAKE2 Go ↔ TypeScript interop", () => {
     const go = spawnGo("./web/testdata/spake2_viewer_interop.go", code);
 
     const client = new SPAKE2Client(enc.encode(code), {
-      aad: enc.encode("lockwire-v1"),
+      aad: enc.encode(SPAKE2_ASSOCIATED_DATA),
     });
     const msgA = client.start();
     go.write(bytesToHex(msgA));
