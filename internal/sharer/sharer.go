@@ -26,16 +26,17 @@ type Config struct {
 }
 
 type Sharer struct {
-	sess       *session.Session
-	relay      RelayConn
-	code       []byte
-	probe      Probe
-	handshakes map[string]*handshakeCtx
-	mu         sync.Mutex
-	done       chan struct{}
-	cancel     context.CancelFunc
-	termCols   uint16
-	termRows   uint16
+	sess        *session.Session
+	relay       RelayConn
+	code        []byte
+	probe       Probe
+	handshakes  map[string]*handshakeCtx
+	viewerIDMap map[string]string // session viewer ID → relay viewer ID
+	mu          sync.Mutex
+	done        chan struct{}
+	cancel      context.CancelFunc
+	termCols    uint16
+	termRows    uint16
 }
 
 type handshakeState int
@@ -59,12 +60,13 @@ func New(sess *session.Session, relay RelayConn, code []byte, probe Probe) *Shar
 		probe = noopProbe{}
 	}
 	return &Sharer{
-		sess:       sess,
-		relay:      relay,
-		code:       code,
-		probe:      probe,
-		handshakes: make(map[string]*handshakeCtx),
-		done:       make(chan struct{}),
+		sess:        sess,
+		relay:       relay,
+		code:        code,
+		probe:       probe,
+		handshakes:  make(map[string]*handshakeCtx),
+		viewerIDMap: make(map[string]string),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -107,10 +109,20 @@ func (s *Sharer) Revoke(ctx context.Context, viewerID string) error {
 		return err
 	}
 
-	for id, enc := range rekeys {
-		delivery := buildKeyDelivery(id, enc)
-		if err := s.sendUnicast(ctx, id, delivery); err != nil {
-			return fmt.Errorf("delivering rekey to %s: %w", id, err)
+	s.mu.Lock()
+	delete(s.viewerIDMap, viewerID)
+	s.mu.Unlock()
+
+	for sessionID, enc := range rekeys {
+		s.mu.Lock()
+		relayID, ok := s.viewerIDMap[sessionID]
+		s.mu.Unlock()
+		if !ok {
+			continue
+		}
+		delivery := buildKeyDelivery(sessionID, enc)
+		if err := s.sendUnicast(ctx, relayID, delivery); err != nil {
+			return fmt.Errorf("delivering rekey to %s: %w", sessionID, err)
 		}
 	}
 
@@ -254,6 +266,11 @@ func (s *Sharer) handleSPAKE2(ctx context.Context, relayViewerID string, payload
 		}
 
 		hs.state = hsComplete
+
+		s.mu.Lock()
+		s.viewerIDMap[info.ID] = relayViewerID
+		s.mu.Unlock()
+
 		s.probe.ViewerJoined(info.ID, hs.clientType)
 
 		s.mu.Lock()

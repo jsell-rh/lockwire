@@ -609,13 +609,20 @@ func TestSharerRevokeRemovesViewerAndSendsRekey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterViewer A: %v", err)
 	}
+	relayIDA := padViewerID("rlA")
 
 	authKeyB := make([]byte, protocol.KeyLen)
 	authKeyB[0] = 0x02
-	_, _, err = sess.RegisterViewer(authKeyB, protocol.ClientTypeBrowser)
+	infoB, _, err := sess.RegisterViewer(authKeyB, protocol.ClientTypeBrowser)
 	if err != nil {
 		t.Fatalf("RegisterViewer B: %v", err)
 	}
+	relayIDB := padViewerID("rlB")
+
+	sh.mu.Lock()
+	sh.viewerIDMap[infoA.ID] = relayIDA
+	sh.viewerIDMap[infoB.ID] = relayIDB
+	sh.mu.Unlock()
 
 	if err := sh.Revoke(ctx, infoA.ID); err != nil {
 		t.Fatalf("Revoke: %v", err)
@@ -626,19 +633,18 @@ func TestSharerRevokeRemovesViewerAndSendsRekey(t *testing.T) {
 		t.Fatalf("expected 1 viewer after revoke, got %d", len(viewers))
 	}
 
-	// Verify rekey unicast was sent to the remaining viewer.
 	msgs := relay.sentMessages()
 	var rekeyFound bool
 	for _, m := range msgs {
 		if len(m) > 0 && m[0] == protocol.MsgTypeUnicast {
 			vid, _ := extractUnicastPayload(m)
-			if vid != padViewerID(infoA.ID) {
+			if vid == relayIDB {
 				rekeyFound = true
 			}
 		}
 	}
 	if !rekeyFound {
-		t.Error("expected a rekey unicast to the remaining viewer")
+		t.Error("expected a rekey unicast to the remaining viewer via relay ID")
 	}
 
 	probe.mu.Lock()
