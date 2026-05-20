@@ -12,7 +12,8 @@ import (
 )
 
 func TestListNoSession(t *testing.T) {
-	removePIDFile()
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
 
 	var stderr bytes.Buffer
 	cmd := newRootCmd("test")

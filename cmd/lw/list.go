@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jsell-rh/lockwire/internal/ipc"
@@ -50,16 +52,39 @@ func runList(cmd *cobra.Command) error {
 
 func resolveSocketPath() (string, error) {
 	data, err := os.ReadFile(pidFilePath())
-	if err != nil {
-		return "", fmt.Errorf("no active session")
+	if err == nil {
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err == nil {
+			path := ipc.SocketPath(pid)
+			if _, err := os.Stat(path); err == nil {
+				return path, nil
+			}
+		}
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return "", fmt.Errorf("no active session")
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "lw-*.sock"))
+	for _, m := range matches {
+		base := filepath.Base(m)
+		pidStr := strings.TrimPrefix(base, "lw-")
+		pidStr = strings.TrimSuffix(pidStr, ".sock")
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+		if isProcessAlive(pid) {
+			return m, nil
+		}
 	}
 
-	return ipc.SocketPath(pid), nil
+	return "", fmt.Errorf("no active session")
+}
+
+func isProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func formatDuration(d time.Duration) string {
