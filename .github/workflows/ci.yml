@@ -10,7 +10,18 @@ permissions:
   contents: read
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.author_association == 'OWNER' ||
+      github.event.pull_request.author_association == 'MEMBER' ||
+      github.event.pull_request.author_association == 'COLLABORATOR'
+    steps:
+      - run: echo "Authorized"
+
   test:
+    needs: authorize
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
