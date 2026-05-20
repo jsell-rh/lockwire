@@ -106,6 +106,12 @@ import { LockwireClient, type ConnectionState } from "./client.js";
 
     t.open(termContainer);
 
+    const initCols = viewportCols();
+    const initRows = viewportRows();
+    if (initCols > 0 && initRows > 0) {
+      t.resize(initCols, initRows);
+    }
+
     t.attachCustomKeyEventHandler((event: KeyboardEvent): boolean => {
       if (event.type !== "keydown") return true;
       switch (event.key) {
