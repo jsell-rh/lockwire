@@ -16,7 +16,7 @@ import (
 	"github.com/jsell-rh/lockwire/internal/protocol"
 )
 
-const viewerSendBufSize = 64
+const viewerSendBufSize = 256
 
 type viewerConn struct {
 	id   string
@@ -255,13 +255,10 @@ func (s *Server) runSharer(sessionID string, sess *session, conn *websocket.Conn
 		switch data[0] {
 		case protocol.MsgTypeStream, protocol.MsgTypeTermSize:
 			sess.mu.Lock()
-			for id, vc := range sess.viewers {
+			for _, vc := range sess.viewers {
 				select {
 				case vc.send <- data:
 				default:
-					close(vc.send)
-					vc.conn.Close(websocket.StatusPolicyViolation, "slow consumer")
-					delete(sess.viewers, id)
 				}
 			}
 			sess.mu.Unlock()

@@ -109,13 +109,18 @@ func (sb *statusBar) Close() {
 }
 
 type barRedrawWriter struct {
-	w   io.Writer
-	bar *statusBar
+	w    io.Writer
+	bar  *statusBar
+	last time.Time
 }
 
 func (bw *barRedrawWriter) Write(p []byte) (int, error) {
 	n, err := bw.w.Write(p)
-	bw.bar.Draw()
+	now := time.Now()
+	if now.Sub(bw.last) >= 100*time.Millisecond {
+		bw.bar.Draw()
+		bw.last = now
+	}
 	return n, err
 }
 
