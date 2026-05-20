@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/jsell-rh/lockwire/compare/v1.0.3...v1.1.0) (2026-05-20)
+
+
+### Features
+
+* **web:** add subtitle and widen code input ([1e85769](https://github.com/jsell-rh/lockwire/commit/1e85769382ae96acf3c926ea15d1d397975b2c1d))
+* **web:** mobile layout, brand colors, and shield icon ([a22ae5e](https://github.com/jsell-rh/lockwire/commit/a22ae5e5f068b7336a01a0d811cee9fc59762ff9))
+* **web:** show version and repo link in footer ([574113f](https://github.com/jsell-rh/lockwire/commit/574113f88f6806c2bbeebcb65259d452f9e05fe9))
+
 ## [1.0.3](https://github.com/jsell-rh/lockwire/compare/v1.0.2...v1.0.3) (2026-05-20)
 
 
