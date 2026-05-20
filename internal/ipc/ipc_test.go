@@ -221,9 +221,10 @@ func TestServerUnknownCommand(t *testing.T) {
 	}
 }
 
-func TestServerSocketPermissions(t *testing.T) {
+func TestServerSocketDirPermissions(t *testing.T) {
 	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "lw-test.sock")
+	sockDir := filepath.Join(dir, "lw-test")
+	sockPath := filepath.Join(sockDir, "ctl.sock")
 
 	sess := &fakeSession{}
 	srv, err := NewServer(sockPath, sess, nil)
@@ -233,20 +234,21 @@ func TestServerSocketPermissions(t *testing.T) {
 	go srv.Serve()
 	defer srv.Close()
 
-	info, err := os.Stat(sockPath)
+	info, err := os.Stat(sockDir)
 	if err != nil {
-		t.Fatalf("stat socket: %v", err)
+		t.Fatalf("stat socket dir: %v", err)
 	}
 
 	perm := info.Mode().Perm()
-	if perm != 0600 {
-		t.Errorf("socket permissions = %o, want 0600", perm)
+	if perm != 0700 {
+		t.Errorf("socket dir permissions = %o, want 0700", perm)
 	}
 }
 
 func TestServerCleanupSocket(t *testing.T) {
 	dir := t.TempDir()
-	sockPath := filepath.Join(dir, "lw-test.sock")
+	sockDir := filepath.Join(dir, "lw-test")
+	sockPath := filepath.Join(sockDir, "ctl.sock")
 
 	sess := &fakeSession{}
 	srv, err := NewServer(sockPath, sess, nil)
@@ -264,6 +266,9 @@ func TestServerCleanupSocket(t *testing.T) {
 
 	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
 		t.Error("socket file should be removed after Close")
+	}
+	if _, err := os.Stat(sockDir); !os.IsNotExist(err) {
+		t.Error("socket directory should be removed after Close")
 	}
 }
 
@@ -384,7 +389,7 @@ func TestClientRevokeUnknownReturnsError(t *testing.T) {
 
 func TestSocketPath(t *testing.T) {
 	path := SocketPath(12345)
-	want := filepath.Join(os.TempDir(), "lw-12345.sock")
+	want := filepath.Join(os.TempDir(), "lw-12345", "ctl.sock")
 	if path != want {
 		t.Errorf("SocketPath(12345) = %q, want %q", path, want)
 	}

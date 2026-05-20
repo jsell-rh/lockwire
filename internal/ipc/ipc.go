@@ -65,13 +65,14 @@ func NewServer(sockPath string, handler SessionHandler, probe Probe) (*Server, e
 		probe = noopProbe{}
 	}
 
+	sockDir := filepath.Dir(sockPath)
+	if err := os.MkdirAll(sockDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating socket directory: %w", err)
+	}
+
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("listening on %s: %w", sockPath, err)
-	}
-	if err := os.Chmod(sockPath, 0600); err != nil {
-		ln.Close()
-		return nil, fmt.Errorf("setting socket permissions: %w", err)
 	}
 
 	return &Server{
@@ -145,12 +146,13 @@ func (s *Server) Close() {
 	s.once.Do(func() {
 		s.listener.Close()
 		os.Remove(s.sockPath)
+		os.Remove(filepath.Dir(s.sockPath))
 	})
 	<-s.done
 }
 
 func SocketPath(pid int) string {
-	return filepath.Join(os.TempDir(), protocol.IPCSocketPrefix+strconv.Itoa(pid)+protocol.IPCSocketSuffix)
+	return filepath.Join(os.TempDir(), protocol.IPCSocketPrefix+strconv.Itoa(pid), "ctl.sock")
 }
 
 func ClientList(sockPath string) ([]ViewerInfo, error) {

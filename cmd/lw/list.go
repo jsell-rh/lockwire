@@ -62,11 +62,10 @@ func resolveSocketPath() (string, error) {
 		}
 	}
 
-	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "lw-*.sock"))
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "lw-*", "ctl.sock"))
 	for _, m := range matches {
-		base := filepath.Base(m)
-		pidStr := strings.TrimPrefix(base, "lw-")
-		pidStr = strings.TrimSuffix(pidStr, ".sock")
+		dir := filepath.Base(filepath.Dir(m))
+		pidStr := strings.TrimPrefix(dir, "lw-")
 		pid, err := strconv.Atoi(pidStr)
 		if err != nil {
 			continue
