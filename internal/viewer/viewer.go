@@ -411,6 +411,14 @@ func (v *Viewer) decryptAndApplySize(frame []byte) {
 	nonce := frame[9 : 9+protocol.NonceLen]
 	ciphertext := frame[9+protocol.NonceLen:]
 
+	var nonceVal uint64
+	for i := 4; i < 12; i++ {
+		nonceVal = nonceVal<<8 | uint64(nonce[i])
+	}
+	if nonceVal <= v.lastNonce {
+		return
+	}
+
 	epochKey, err := crypto.DeriveEpochKey(v.streamKey, epoch)
 	if err != nil {
 		return
@@ -421,6 +429,7 @@ func (v *Viewer) decryptAndApplySize(frame []byte) {
 	if err != nil {
 		return
 	}
+	v.lastNonce = nonceVal
 
 	if len(plaintext) < 4 {
 		return
