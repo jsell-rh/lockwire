@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/jsell-rh/lockwire/compare/v1.0.0...v1.0.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **build:** split terminal raw mode into platform-specific files ([a514d67](https://github.com/jsell-rh/lockwire/commit/a514d67974118229fe8252617253a5abcad7a96b))
+* **ci:** cross-compile natively instead of QEMU emulation ([4cf14af](https://github.com/jsell-rh/lockwire/commit/4cf14af1bc881e3dfaa3a703ad2136f38d3ca727))
+
 ## 1.0.0 (2026-05-20)
 
 
