@@ -65,7 +65,7 @@ export class LockwireClient {
     this.setState("connecting");
 
     const codeBytes = new TextEncoder().encode(code);
-    const sessionID = await deriveSessionID(codeBytes);
+    const sessionID = deriveSessionID(codeBytes);
 
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${proto}//${window.location.host}/api/watch/${sessionID}`;

@@ -1,7 +1,7 @@
 import { p256 } from "@noble/curves/p256";
-import { sha256 } from "@noble/hashes/sha256";
-import { hmac } from "@noble/hashes/hmac";
-import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { hkdf } from "@noble/hashes/hkdf.js";
 import { SPAKE2_CONFIRMATION_KEYS_INFO } from "./protocol.js";
 
 type Point = ReturnType<typeof p256.ProjectivePoint.fromHex>;

@@ -1,4 +1,5 @@
-import { argon2id } from "hash-wasm";
+import { argon2id } from "@noble/hashes/argon2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   KEY_LEN,
   NONCE_LEN,
@@ -15,16 +16,14 @@ function toBuffer(data: Uint8Array): ArrayBuffer {
   return new Uint8Array(data).buffer as ArrayBuffer;
 }
 
-export async function deriveSessionID(code: Uint8Array): Promise<string> {
-  return argon2id({
-    password: code,
-    salt: new TextEncoder().encode(SESSION_ID_ARGON_SALT),
-    iterations: SESSION_ID_ARGON_TIME,
-    memorySize: SESSION_ID_ARGON_MEMORY,
-    parallelism: SESSION_ID_ARGON_THREADS,
-    hashLength: SESSION_ID_LEN,
-    outputType: "hex",
+export function deriveSessionID(code: Uint8Array): string {
+  const hash = argon2id(code, new TextEncoder().encode(SESSION_ID_ARGON_SALT), {
+    t: SESSION_ID_ARGON_TIME,
+    m: SESSION_ID_ARGON_MEMORY,
+    p: SESSION_ID_ARGON_THREADS,
+    dkLen: SESSION_ID_LEN,
   });
+  return bytesToHex(hash);
 }
 
 export async function deriveEpochKey(
