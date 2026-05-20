@@ -23,6 +23,7 @@ func newRootCmd(ver string) *cobra.Command {
 	root.AddCommand(newJoinCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newRevokeCmd())
+	root.AddCommand(newRelayCmd())
 
 	return root
 }

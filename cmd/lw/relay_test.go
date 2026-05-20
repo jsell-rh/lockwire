@@ -1,0 +1,261 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"net/http"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+func TestRelayCommandRegistered(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	found := false
+	for _, c := range root.Commands() {
+		if c.Name() == "relay" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("relay subcommand not registered on root")
+	}
+}
+
+func TestRelayFlagDefaults(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	var relay *bytes.Buffer
+	for _, c := range root.Commands() {
+		if c.Name() == "relay" {
+			relay = &bytes.Buffer{}
+			c.SetOut(relay)
+			listen, err := c.Flags().GetString("listen")
+			if err != nil {
+				t.Fatalf("getting --listen flag: %v", err)
+			}
+			if listen != ":8443" {
+				t.Errorf("--listen default = %q, want %q", listen, ":8443")
+			}
+			break
+		}
+	}
+	if relay == nil {
+		t.Fatal("relay subcommand not found")
+	}
+}
+
+func TestRelayRequiresTLSFlags(t *testing.T) {
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{"relay"})
+	var stderr bytes.Buffer
+	root.SetErr(&stderr)
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when --tls-cert and --tls-key are missing")
+	}
+}
+
+func TestRelayStartsAndServesHTTPS(t *testing.T) {
+	certFile, keyFile := generateTestCert(t)
+
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{
+		"relay",
+		"--listen", "127.0.0.1:0",
+		"--tls-cert", certFile,
+		"--tls-key", keyFile,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addrCh := make(chan string, 1)
+	setRelayAddrNotify(func(addr string) {
+		addrCh <- addr
+	})
+	defer setRelayAddrNotify(nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runRelayWithContext(ctx, root)
+	}()
+
+	var addr string
+	select {
+	case addr = <-addrCh:
+	case err := <-errCh:
+		t.Fatalf("relay exited early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay to start")
+	}
+
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		t.Fatalf("reading cert: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(certPEM)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool},
+		},
+	}
+
+	resp, err := client.Get("https://" + addr + "/join")
+	if err != nil {
+		t.Fatalf("GET /join: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /join status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("relay returned error on shutdown: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("relay did not shut down within 5s")
+	}
+}
+
+func TestRelayAcceptsWebSocketConnections(t *testing.T) {
+	certFile, keyFile := generateTestCert(t)
+
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{
+		"relay",
+		"--listen", "127.0.0.1:0",
+		"--tls-cert", certFile,
+		"--tls-key", keyFile,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addrCh := make(chan string, 1)
+	setRelayAddrNotify(func(addr string) {
+		addrCh <- addr
+	})
+	defer setRelayAddrNotify(nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runRelayWithContext(ctx, root)
+	}()
+
+	var addr string
+	select {
+	case addr = <-addrCh:
+	case err := <-errCh:
+		t.Fatalf("relay exited early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay to start")
+	}
+
+	certPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		t.Fatalf("reading cert: %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(certPEM)
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+
+	sessionID := "aabbccdd11223344aabbccdd11223344"
+	wsConn, _, err := websocket.Dial(dialCtx, "wss://"+addr+"/api/share/"+sessionID, &websocket.DialOptions{
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: pool},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("WebSocket dial: %v", err)
+	}
+	defer wsConn.CloseNow()
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer readCancel()
+	_, data, err := wsConn.Read(readCtx)
+	if err != nil {
+		t.Fatalf("reading registration ack: %v", err)
+	}
+	if len(data) < 2 || data[0] != 0x06 || data[1] != 0x01 {
+		t.Errorf("expected registration-ack (0x06 0x01), got %x", data)
+	}
+
+	cancel()
+}
+
+func TestRelayGracefulShutdown(t *testing.T) {
+	certFile, keyFile := generateTestCert(t)
+
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{
+		"relay",
+		"--listen", "127.0.0.1:0",
+		"--tls-cert", certFile,
+		"--tls-key", keyFile,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	addrCh := make(chan string, 1)
+	setRelayAddrNotify(func(addr string) {
+		addrCh <- addr
+	})
+	defer setRelayAddrNotify(nil)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runRelayWithContext(ctx, root)
+	}()
+
+	select {
+	case <-addrCh:
+	case err := <-errCh:
+		t.Fatalf("relay exited early: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for relay to start")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("expected clean shutdown, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("relay did not shut down within 5s")
+	}
+}
+
+func generateTestCert(t *testing.T) (certFile, keyFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+
+	certPEM, keyPEM := selfSignedCert()
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
+		t.Fatalf("writing cert: %v", err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
+		t.Fatalf("writing key: %v", err)
+	}
+	return certFile, keyFile
+}
