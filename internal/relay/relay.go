@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,7 +43,7 @@ type Server struct {
 
 type Option func(*Server)
 
-func WithWebAssets(assets fs.FS) Option {
+func WithWebAssets(assets fs.FS, version string) Option {
 	return func(s *Server) {
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			data, err := fs.ReadFile(assets, "dist/index.html")
@@ -50,8 +51,9 @@ func WithWebAssets(assets fs.FS) Option {
 				http.NotFound(w, r)
 				return
 			}
+			html := strings.Replace(string(data), "__VERSION__", version, 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write(data)
+			w.Write([]byte(html))
 		})
 		s.mux.Handle("GET /join", handler)
 		s.mux.Handle("GET /{$}", handler)

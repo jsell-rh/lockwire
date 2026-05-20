@@ -413,7 +413,7 @@ func TestWebViewerServedAtJoin(t *testing.T) {
 			Data: []byte(`<!DOCTYPE html><html><body><input id="code"><button id="watch">Watch</button></body></html>`),
 		},
 	}
-	srv := NewServer(WithWebAssets(assets))
+	srv := NewServer(WithWebAssets(assets, "test"))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -447,7 +447,7 @@ func TestWebViewerServedAtRoot(t *testing.T) {
 			Data: []byte(`<!DOCTYPE html><html><body>lockwire</body></html>`),
 		},
 	}
-	srv := NewServer(WithWebAssets(assets))
+	srv := NewServer(WithWebAssets(assets, "test"))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -487,7 +487,7 @@ func TestAPIRoutesWorkWithWebAssets(t *testing.T) {
 	assets := fstest.MapFS{
 		"dist/index.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
 	}
-	srv := NewServer(WithWebAssets(assets))
+	srv := NewServer(WithWebAssets(assets, "test"))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -510,7 +510,7 @@ func TestWebViewerMissingIndexReturns404(t *testing.T) {
 	assets := fstest.MapFS{
 		"dist/other.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
 	}
-	srv := NewServer(WithWebAssets(assets))
+	srv := NewServer(WithWebAssets(assets, "test"))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 

@@ -11,7 +11,7 @@ import (
 )
 
 func TestRelayServesEmbeddedAssets(t *testing.T) {
-	srv := relay.NewServer(relay.WithWebAssets(Assets))
+	srv := relay.NewServer(relay.WithWebAssets(Assets, "test"))
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 

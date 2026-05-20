@@ -32,6 +32,13 @@ h1{font-size:1.5rem;font-weight:600;margin-bottom:1.5rem;color:#fff}
 #status{font-size:0.875rem;color:#888;min-height:1.25rem}
 #status.error{color:#e94560}
 
+.footer{
+  position:fixed;bottom:0.75rem;left:0;right:0;text-align:center;
+  font-size:0.75rem;color:#555
+}
+.footer a{color:#888;text-decoration:none}
+.footer a:hover{color:#e0e0e0}
+
 #terminal-container{
   position:fixed;inset:0;display:none;background:#000;overflow-x:auto
 }
@@ -64,6 +71,7 @@ h1{font-size:1.5rem;font-weight:600;margin-bottom:1.5rem;color:#fff}
 <div id="terminal-container"></div>
 <div class="overlay" id="overlay"><span id="overlay-msg"></span></div>
 <div class="size-banner" id="size-banner"></div>
+<div class="footer"><a href="https://github.com/jsell-rh/lockwire">lockwire</a> __VERSION__</div>
 
 <script>
 /* __BUNDLE__ */

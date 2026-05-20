@@ -113,7 +113,7 @@ func serveRelay(ctx context.Context, cmd *cobra.Command, listen string, cert tls
 	rl := relay.NewRateLimiter(relay.DefaultRateLimitConfig(), probe, time.Now)
 
 	srv := relay.NewServer(
-		relay.WithWebAssets(web.Assets),
+		relay.WithWebAssets(web.Assets, version),
 		relay.WithProbe(probe),
 		relay.WithRateLimiter(rl),
 	)
