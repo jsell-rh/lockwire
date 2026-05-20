@@ -15,6 +15,7 @@ import (
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:          "list",
+		Aliases:      []string{"viewers"},
 		Short:        "List connected viewers for the active session",
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
