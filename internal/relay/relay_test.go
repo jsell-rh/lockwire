@@ -547,12 +547,185 @@ func TestProbeReceivesAcceptError(t *testing.T) {
 }
 
 type recordingRelayProbe struct {
-	onAcceptError func(handler string, err error)
+	onAcceptError  func(handler string, err error)
+	onRateLimited  func(ip string, activity string)
+	onBanTriggered func(ip string, activity string, duration string)
 }
 
 func (p *recordingRelayProbe) AcceptError(handler string, err error) {
 	if p.onAcceptError != nil {
 		p.onAcceptError(handler, err)
+	}
+}
+
+func (p *recordingRelayProbe) RateLimited(ip string, activity string) {
+	if p.onRateLimited != nil {
+		p.onRateLimited(ip, activity)
+	}
+}
+
+func (p *recordingRelayProbe) BanTriggered(ip string, activity string, duration string) {
+	if p.onBanTriggered != nil {
+		p.onBanTriggered(ip, activity, duration)
+	}
+}
+
+func TestConnectionRateExceededReturns429(t *testing.T) {
+	clk := newFakeClock()
+	probe := &recordingRelayProbe{}
+	rl := NewRateLimiter(RateLimitConfig{
+		ConnectionLimit:    3,
+		ConnectionWindow:   time.Minute,
+		RegistrationLimit:  protocol.DefaultRegistrationRateLimit,
+		RegistrationWindow: time.Minute,
+		HandshakeLimit:     protocol.DefaultHandshakeRateLimit,
+		HandshakeWindow:    10 * time.Minute,
+	}, probe, clk.Now)
+
+	srv := NewServer(WithRateLimiter(rl), WithProbe(probe))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	sid := randomSessionID(t)
+	sharer := dialShare(t, ts, sid)
+	_ = readMsg(t, sharer)
+
+	for range 3 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+randomSessionID(t), nil)
+		cancel()
+		if err == nil {
+			conn.CloseNow()
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+sid, nil)
+	if err == nil {
+		t.Fatal("expected dial to fail with 429")
+	}
+	if resp != nil && resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+}
+
+func TestBannedIPReturns403(t *testing.T) {
+	clk := newFakeClock()
+	probe := &recordingRelayProbe{}
+	rl := NewRateLimiter(RateLimitConfig{
+		ConnectionLimit:    2,
+		ConnectionWindow:   time.Minute,
+		RegistrationLimit:  protocol.DefaultRegistrationRateLimit,
+		RegistrationWindow: time.Minute,
+		HandshakeLimit:     protocol.DefaultHandshakeRateLimit,
+		HandshakeWindow:    10 * time.Minute,
+	}, probe, clk.Now)
+
+	srv := NewServer(WithRateLimiter(rl), WithProbe(probe))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	banThreshold := 2 * protocol.RateLimitBanMultiplier
+	for range banThreshold {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, _, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+randomSessionID(t), nil)
+		cancel()
+		if err == nil {
+			conn.CloseNow()
+		}
+	}
+
+	if !rl.IsBanned("127.0.0.1") {
+		t.Fatal("IP should be banned")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, ts.URL+"/api/watch/"+randomSessionID(t), nil)
+	if err == nil {
+		t.Fatal("expected dial to fail with 403")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestRegistrationRateExceededReturns429(t *testing.T) {
+	clk := newFakeClock()
+	rl := NewRateLimiter(RateLimitConfig{
+		ConnectionLimit:    100,
+		ConnectionWindow:   time.Minute,
+		RegistrationLimit:  2,
+		RegistrationWindow: time.Minute,
+		HandshakeLimit:     protocol.DefaultHandshakeRateLimit,
+		HandshakeWindow:    10 * time.Minute,
+	}, &recordingRelayProbe{}, clk.Now)
+
+	srv := NewServer(WithRateLimiter(rl))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	for range 2 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, _, err := websocket.Dial(ctx, ts.URL+"/api/share/"+randomSessionID(t), nil)
+		cancel()
+		if err == nil {
+			conn.CloseNow()
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, ts.URL+"/api/share/"+randomSessionID(t), nil)
+	if err == nil {
+		t.Fatal("expected dial to fail with 429")
+	}
+	if resp != nil && resp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTooManyRequests)
+	}
+}
+
+func TestRateLimitDoesNotAffectOtherIPs(t *testing.T) {
+	clk := newFakeClock()
+	rl := NewRateLimiter(RateLimitConfig{
+		ConnectionLimit:    1,
+		ConnectionWindow:   time.Minute,
+		RegistrationLimit:  protocol.DefaultRegistrationRateLimit,
+		RegistrationWindow: time.Minute,
+		HandshakeLimit:     protocol.DefaultHandshakeRateLimit,
+		HandshakeWindow:    10 * time.Minute,
+	}, &recordingRelayProbe{}, clk.Now)
+
+	srv := NewServer(WithRateLimiter(rl))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	sid := randomSessionID(t)
+	sharer := dialShare(t, ts, sid)
+	_ = readMsg(t, sharer)
+
+	viewer := dialWatch(t, ts, sid)
+	msg := readMsg(t, viewer)
+	if msg[1] != protocol.CtrlJoinAck {
+		t.Errorf("expected join-ack, got 0x%02x", msg[1])
+	}
+}
+
+func TestNoRateLimiterAllowsUnlimited(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	for range 30 {
+		sid := randomSessionID(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, _, err := websocket.Dial(ctx, ts.URL+"/api/share/"+sid, nil)
+		cancel()
+		if err != nil {
+			t.Fatalf("request should succeed without rate limiter: %v", err)
+		}
+		conn.CloseNow()
 	}
 }
 

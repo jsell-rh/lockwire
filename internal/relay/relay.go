@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -31,11 +32,12 @@ type session struct {
 }
 
 type Server struct {
-	mu         sync.Mutex
-	sessions   map[string]*session
-	maxViewers int
-	mux        *http.ServeMux
-	probe      Probe
+	mu          sync.Mutex
+	sessions    map[string]*session
+	maxViewers  int
+	mux         *http.ServeMux
+	probe       Probe
+	rateLimiter *RateLimiter
 }
 
 type Option func(*Server)
@@ -62,6 +64,12 @@ func WithProbe(p Probe) Option {
 	}
 }
 
+func WithRateLimiter(rl *RateLimiter) Option {
+	return func(s *Server) {
+		s.rateLimiter = rl
+	}
+}
+
 func NewServer(opts ...Option) *Server {
 	s := &Server{
 		sessions:   make(map[string]*session),
@@ -69,16 +77,41 @@ func NewServer(opts ...Option) *Server {
 		probe:      noopRelayProbe{},
 	}
 	s.mux = http.NewServeMux()
-	s.mux.HandleFunc("GET /api/share/{sessionID}", s.handleShare)
-	s.mux.HandleFunc("GET /api/watch/{sessionID}", s.handleWatch)
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.mux.HandleFunc("GET /api/share/{sessionID}", s.rateLimitWrap(s.handleShare, EventRegistration))
+	s.mux.HandleFunc("GET /api/watch/{sessionID}", s.rateLimitWrap(s.handleWatch, EventConnection))
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) rateLimitWrap(next http.HandlerFunc, event EventType) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.rateLimiter != nil {
+			ip := extractIP(r)
+			if s.rateLimiter.IsBanned(ip) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			if !s.rateLimiter.Allow(ip, event) {
+				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func extractIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func validSessionID(id string) bool {

@@ -59,4 +59,21 @@ const (
 	SharerTimeoutSec        = 10
 	ViewerTimeoutSec        = 30
 	HeartbeatIntervalSec    = 5
+
+	// Rate limiting defaults.
+	DefaultConnectionRateLimit    = 20
+	DefaultConnectionRateWindow   = 60  // seconds
+	DefaultHandshakeRateLimit     = 5
+	DefaultHandshakeRateWindow    = 600 // seconds (10 minutes)
+	DefaultRegistrationRateLimit  = 5
+	DefaultRegistrationRateWindow = 60  // seconds
+
+	// Ban thresholds.
+	RateLimitBanMultiplier     = 3    // ban when threshold exceeded by this factor
+	RateLimitViolationBanCount = 3    // ban after this many violations in window
+	RateLimitViolationWindow   = 3600 // seconds (1 hour)
+
+	// Ban durations (seconds).
+	BanDurationFirst  = 3600  // 1 hour
+	BanDurationSecond = 86400 // 24 hours
 )
