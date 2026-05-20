@@ -12,7 +12,9 @@ func (p *viewerStatusBarProbe) HandshakeCompleted(viewerID string) {
 	fmt.Fprint(p.bar.out, "\r\033[K")
 }
 
-func (p *viewerStatusBarProbe) FrameDecrypted(uint64, int) {}
+func (p *viewerStatusBarProbe) FrameDecrypted(uint64, int) {
+	p.bar.Draw()
+}
 
 func (p *viewerStatusBarProbe) StreamKeyRotated() {}
 

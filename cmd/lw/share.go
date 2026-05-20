@@ -109,7 +109,7 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 		}
 	}()
 
-	tee := io.TeeReader(term, os.Stdout)
+	tee := io.TeeReader(term, &barRedrawWriter{w: os.Stdout, bar: bar})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

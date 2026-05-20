@@ -101,6 +101,17 @@ func (sb *statusBar) Close() {
 	sb.mu.Unlock()
 }
 
+type barRedrawWriter struct {
+	w   io.Writer
+	bar *statusBar
+}
+
+func (bw *barRedrawWriter) Write(p []byte) (int, error) {
+	n, err := bw.w.Write(p)
+	bw.bar.Draw()
+	return n, err
+}
+
 func padOrTruncate(s string, width int) string {
 	if len(s) >= width {
 		return s[:width]
