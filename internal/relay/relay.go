@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"io/fs"
 	"math/big"
 	"net/http"
 	"sync"
@@ -35,16 +35,45 @@ type Server struct {
 	sessions   map[string]*session
 	maxViewers int
 	mux        *http.ServeMux
+	probe      Probe
 }
 
-func NewServer() *Server {
+type Option func(*Server)
+
+func WithWebAssets(assets fs.FS) Option {
+	return func(s *Server) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, err := fs.ReadFile(assets, "index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write(data)
+		})
+		s.mux.Handle("GET /join", handler)
+		s.mux.Handle("GET /{$}", handler)
+	}
+}
+
+func WithProbe(p Probe) Option {
+	return func(s *Server) {
+		s.probe = p
+	}
+}
+
+func NewServer(opts ...Option) *Server {
 	s := &Server{
 		sessions:   make(map[string]*session),
 		maxViewers: protocol.DefaultMaxViewers,
+		probe:      noopRelayProbe{},
 	}
 	s.mux = http.NewServeMux()
 	s.mux.HandleFunc("GET /api/share/{sessionID}", s.handleShare)
 	s.mux.HandleFunc("GET /api/watch/{sessionID}", s.handleWatch)
+	for _, opt := range opts {
+		opt(s)
+	}
 	return s
 }
 
@@ -69,7 +98,7 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
-		log.Printf("relay: accept share: %v", err)
+		s.probe.AcceptError("share", err)
 		return
 	}
 
@@ -102,7 +131,7 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
-		log.Printf("relay: accept watch: %v", err)
+		s.probe.AcceptError("watch", err)
 		return
 	}
 

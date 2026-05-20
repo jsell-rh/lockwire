@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -401,6 +404,105 @@ func TestInvalidSessionIDRejected(t *testing.T) {
 				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
 			}
 		})
+	}
+}
+
+func TestWebViewerServedAtJoin(t *testing.T) {
+	assets := fstest.MapFS{
+		"index.html": &fstest.MapFile{
+			Data: []byte(`<!DOCTYPE html><html><body><input id="code"><button id="watch">Watch</button></body></html>`),
+		},
+	}
+	srv := NewServer(WithWebAssets(assets))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/join")
+	if err != nil {
+		t.Fatalf("GET /join: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("content-type = %q, want text/html", ct)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `id="code"`) {
+		t.Error("HTML missing code input field")
+	}
+	if !strings.Contains(string(body), "Watch") {
+		t.Error("HTML missing Watch button")
+	}
+}
+
+func TestWebViewerServedAtRoot(t *testing.T) {
+	assets := fstest.MapFS{
+		"index.html": &fstest.MapFile{
+			Data: []byte(`<!DOCTYPE html><html><body>lockwire</body></html>`),
+		},
+	}
+	srv := NewServer(WithWebAssets(assets))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "lockwire") {
+		t.Error("root route did not serve web viewer")
+	}
+}
+
+func TestWebViewerNotServedWithoutAssets(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/join")
+	if err != nil {
+		t.Fatalf("GET /join: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("expected non-200 for /join without web assets, got %d", resp.StatusCode)
+	}
+}
+
+func TestAPIRoutesWorkWithWebAssets(t *testing.T) {
+	assets := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(`<html></html>`)},
+	}
+	srv := NewServer(WithWebAssets(assets))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	sid := randomSessionID(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, ts.URL+"/api/share/"+sid, nil)
+	if err != nil {
+		t.Fatalf("WebSocket dial failed with web assets enabled: %v", err)
+	}
+	defer conn.CloseNow()
+
+	msg := readMsg(t, conn)
+	if len(msg) < 2 || msg[1] != protocol.CtrlRegistrationAck {
+		t.Errorf("expected registration ack, got %x", msg)
 	}
 }
 
