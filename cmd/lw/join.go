@@ -103,7 +103,7 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 		color:     colorWarningAmber,
 		content: func() string {
 			suffix, _ := sizeSuffix.Load().(string)
-			return "lw | watching " + normalized + suffix
+			return "lw | watching " + normalized + suffix + " | Ctrl+C to quit"
 		},
 	})
 	fmt.Fprint(os.Stdout, "\033[2J\033[H")
@@ -115,22 +115,37 @@ func runJoin(cmd *cobra.Command, rawCode, relayURL string, insecure bool) error 
 		clearLine(os.Stdout, outerRows)
 	}()
 
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 && buf[0] == 0x03 {
+				cancel()
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	probe := &viewerStatusBarProbe{bar: bar}
 	v := viewer.New(relay, []byte(normalized), os.Stdout, probe)
 
 	v.SetResizeHandler(func(cols, rows uint16) {
 		tryResizeTerminal(stdinFd, cols, outerRows)
 
+		time.Sleep(50 * time.Millisecond)
 		ws, wsErr := unix.IoctlGetWinsize(stdinFd, unix.TIOCGWINSZ)
 		if wsErr != nil {
 			return
 		}
-		if ws.Col < cols {
-			sizeSuffix.Store(fmt.Sprintf(" [sharer: %d cols]", cols))
+		if ws.Col != cols {
+			sizeSuffix.Store(fmt.Sprintf(" [resize to %d cols]", cols))
 		} else {
 			sizeSuffix.Store("")
 		}
-		bar.Draw()
+		bar.Resize(ws.Col, ws.Row)
 	})
 
 	err = v.Run(ctx)
