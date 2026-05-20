@@ -32,3 +32,5 @@ export const CTRL_SESSION_ID_CONFLICT: number = 0x06;
 
 export const HEARTBEAT_INTERVAL_MS = 5000;
 export const VIEWER_REVOCATION_FAILURE_THRESHOLD = 10;
+
+export const SPAKE2_CONFIRMATION_KEYS_INFO = "ConfirmationKeys";

@@ -2,6 +2,7 @@ import { p256 } from "@noble/curves/p256";
 import { sha256 } from "@noble/hashes/sha256";
 import { hmac } from "@noble/hashes/hmac";
 import { hkdf } from "@noble/hashes/hkdf";
+import { SPAKE2_CONFIRMATION_KEYS_INFO } from "./protocol.js";
 
 type Point = ReturnType<typeof p256.ProjectivePoint.fromHex>;
 const ProjectivePoint = p256.ProjectivePoint;
@@ -175,7 +176,7 @@ export class SPAKE2Server {
     const authKey = h.slice(halfLen);
 
     const confirmInfo = new Uint8Array([
-      ...new TextEncoder().encode("ConfirmationKeys"),
+      ...new TextEncoder().encode(SPAKE2_CONFIRMATION_KEYS_INFO),
       ...(this.aad ?? []),
     ]);
     const kc = hkdfSHA256(authKey, undefined, confirmInfo, 32);
@@ -269,7 +270,7 @@ export class SPAKE2Client {
     const authKey = h.slice(halfLen);
 
     const confirmInfo = new Uint8Array([
-      ...new TextEncoder().encode("ConfirmationKeys"),
+      ...new TextEncoder().encode(SPAKE2_CONFIRMATION_KEYS_INFO),
       ...(this.aad ?? []),
     ]);
     const kc = hkdfSHA256(authKey, undefined, confirmInfo, 32);
