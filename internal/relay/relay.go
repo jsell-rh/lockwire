@@ -297,6 +297,13 @@ func (s *Server) runViewer(sess *session, vc *viewerConn) {
 			close(vc.send)
 			delete(sess.viewers, vc.id)
 		}
+		if !sess.closed {
+			msg := make([]byte, 2+protocol.ViewerIDLen)
+			msg[0] = protocol.MsgTypeControl
+			msg[1] = protocol.CtrlViewerDisconnected
+			copy(msg[2:], vc.id)
+			_ = sess.sharer.Write(context.Background(), websocket.MessageBinary, msg)
+		}
 		sess.mu.Unlock()
 	}()
 

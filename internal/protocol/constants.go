@@ -39,12 +39,13 @@ const (
 	MsgTypeTermSize  byte = 0x07 // Sharer → Relay → all Viewers (broadcast)
 
 	// Control frame sub-types (payload byte after MsgTypeControl).
-	CtrlRegistrationAck  byte = 0x01
-	CtrlJoinAck          byte = 0x02
-	CtrlSessionNotFound  byte = 0x03
-	CtrlSessionEnded     byte = 0x04
-	CtrlSessionFull      byte = 0x05
+	CtrlRegistrationAck   byte = 0x01
+	CtrlJoinAck           byte = 0x02
+	CtrlSessionNotFound   byte = 0x03
+	CtrlSessionEnded      byte = 0x04
+	CtrlSessionFull       byte = 0x05
 	CtrlSessionIDConflict byte = 0x06
+	CtrlViewerDisconnected byte = 0x07
 
 	// IPC control socket.
 	IPCSocketPrefix = "lw-"

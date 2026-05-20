@@ -186,10 +186,38 @@ func (s *Sharer) relayLoop(ctx context.Context) error {
 			// heartbeat response, nothing to do
 
 		case protocol.MsgTypeControl:
-			if len(data) >= 2 && data[1] == protocol.CtrlRegistrationAck {
-				s.probe.RelayConnected("")
+			if len(data) >= 2 {
+				switch data[1] {
+				case protocol.CtrlRegistrationAck:
+					s.probe.RelayConnected("")
+				case protocol.CtrlViewerDisconnected:
+					if len(data) >= 2+protocol.ViewerIDLen {
+						relayID := string(data[2 : 2+protocol.ViewerIDLen])
+						s.handleViewerDisconnect(relayID)
+					}
+				}
 			}
 		}
+	}
+}
+
+func (s *Sharer) handleViewerDisconnect(relayViewerID string) {
+	s.mu.Lock()
+	var sessionID string
+	for sid, rid := range s.viewerIDMap {
+		if rid == relayViewerID {
+			sessionID = sid
+			break
+		}
+	}
+	if sessionID != "" {
+		delete(s.viewerIDMap, sessionID)
+	}
+	s.mu.Unlock()
+
+	if sessionID != "" {
+		s.sess.RemoveViewer(sessionID)
+		s.probe.ViewerLeft(sessionID)
 	}
 }
 
