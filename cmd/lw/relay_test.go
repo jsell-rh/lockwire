@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jsell-rh/lockwire/internal/protocol"
 )
 
 func TestRelayCommandRegistered(t *testing.T) {
@@ -59,6 +60,26 @@ func TestRelayRequiresTLSFlags(t *testing.T) {
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error when --tls-cert and --tls-key are missing")
+	}
+}
+
+func TestRelayInvalidCertFails(t *testing.T) {
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "bad.pem")
+	keyFile := filepath.Join(dir, "bad-key.pem")
+	os.WriteFile(certFile, []byte("not a cert"), 0o600)
+	os.WriteFile(keyFile, []byte("not a key"), 0o600)
+
+	root := newRootCmd("v0.0.0-test")
+	root.SetArgs([]string{
+		"relay",
+		"--tls-cert", certFile,
+		"--tls-key", keyFile,
+	})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid cert/key")
 	}
 }
 
@@ -193,8 +214,8 @@ func TestRelayAcceptsWebSocketConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading registration ack: %v", err)
 	}
-	if len(data) < 2 || data[0] != 0x06 || data[1] != 0x01 {
-		t.Errorf("expected registration-ack (0x06 0x01), got %x", data)
+	if len(data) < 2 || data[0] != protocol.MsgTypeControl || data[1] != protocol.CtrlRegistrationAck {
+		t.Errorf("expected registration-ack, got %x", data)
 	}
 
 	cancel()
