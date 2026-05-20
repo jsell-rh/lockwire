@@ -71,6 +71,8 @@ func (p *rateLimitProbe) BanTriggered(ip, activity, duration string) {
 	p.banCalls = append(p.banCalls, banCall{ip, activity, duration})
 }
 
+func (p *rateLimitProbe) ConnectionAccepted(string, string) {}
+
 func TestRateLimiterAllowsBelowThreshold(t *testing.T) {
 	clk := newFakeClock()
 	rl := NewRateLimiter(defaultTestConfig(), &rateLimitProbe{}, clk.Now)

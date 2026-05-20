@@ -7,7 +7,8 @@ import (
 )
 
 type logRelayProbe struct {
-	out io.Writer
+	out   io.Writer
+	debug bool
 }
 
 func (p *logRelayProbe) AcceptError(handler string, err error) {
@@ -23,4 +24,11 @@ func (p *logRelayProbe) RateLimited(ip string, activity string) {
 func (p *logRelayProbe) BanTriggered(ip string, activity string, duration string) {
 	fmt.Fprintf(p.out, "%s [relay] ban triggered ip=%s activity=%s duration=%s\n",
 		time.Now().UTC().Format(time.RFC3339), ip, activity, duration)
+}
+
+func (p *logRelayProbe) ConnectionAccepted(handler string, clientIP string) {
+	if p.debug {
+		fmt.Fprintf(p.out, "%s [relay] connection handler=%s client=%s\n",
+			time.Now().UTC().Format(time.RFC3339), handler, clientIP)
+	}
 }

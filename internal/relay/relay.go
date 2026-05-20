@@ -106,8 +106,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) rateLimitWrap(next http.HandlerFunc, event EventType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := s.extractIP(r)
+		s.probe.ConnectionAccepted(eventName(event), ip)
 		if s.rateLimiter != nil {
-			ip := s.extractIP(r)
 			if s.rateLimiter.IsBanned(ip) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return

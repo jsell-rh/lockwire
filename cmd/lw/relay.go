@@ -45,6 +45,7 @@ func newRelayCmd() *cobra.Command {
 		keyFile       string
 		selfSigned    bool
 		trustedProxy  []string
+		logLevel      string
 	)
 
 	cmd := &cobra.Command{
@@ -68,9 +69,9 @@ func newRelayCmd() *cobra.Command {
 			defer cancel()
 
 			if selfSigned {
-				return startRelaySelfSigned(ctx, cmd, listen, trustedProxy)
+				return startRelaySelfSigned(ctx, cmd, listen, trustedProxy, logLevel)
 			}
-			return startRelay(ctx, cmd, listen, certFile, keyFile, trustedProxy)
+			return startRelay(ctx, cmd, listen, certFile, keyFile, trustedProxy, logLevel)
 		},
 	}
 
@@ -79,11 +80,12 @@ func newRelayCmd() *cobra.Command {
 	cmd.Flags().StringVar(&keyFile, "tls-key", "", "path to TLS private key file")
 	cmd.Flags().BoolVar(&selfSigned, "self-signed", false, "generate a self-signed TLS certificate at startup")
 	cmd.Flags().StringSliceVar(&trustedProxy, "trusted-proxy", nil, "CIDR ranges to trust for X-Forwarded-For/CF-Connecting-IP (e.g. 127.0.0.0/8)")
+	cmd.Flags().StringVar(&logLevel, "log-level", "info", "log level: info or debug")
 
 	return cmd
 }
 
-func startRelay(ctx context.Context, cmd *cobra.Command, listen, certFile, keyFile string, proxyCIDRs []string) error {
+func startRelay(ctx context.Context, cmd *cobra.Command, listen, certFile, keyFile string, proxyCIDRs []string, logLevel string) error {
 	certPEM, err := os.ReadFile(certFile)
 	if err != nil {
 		return fmt.Errorf("could not load TLS certificate: %w", err)
@@ -97,20 +99,24 @@ func startRelay(ctx context.Context, cmd *cobra.Command, listen, certFile, keyFi
 		return fmt.Errorf("could not load TLS certificate: %w", err)
 	}
 
-	return serveRelay(ctx, cmd, listen, cert, "", proxyCIDRs)
+	return serveRelay(ctx, cmd, listen, cert, "", proxyCIDRs, logLevel)
 }
 
-func startRelaySelfSigned(ctx context.Context, cmd *cobra.Command, listen string, proxyCIDRs []string) error {
+func startRelaySelfSigned(ctx context.Context, cmd *cobra.Command, listen string, proxyCIDRs []string, logLevel string) error {
 	cert, fingerprint, err := generateSelfSignedCert(listen)
 	if err != nil {
 		return fmt.Errorf("generating self-signed certificate: %w", err)
 	}
 
-	return serveRelay(ctx, cmd, listen, cert, fingerprint, proxyCIDRs)
+	return serveRelay(ctx, cmd, listen, cert, fingerprint, proxyCIDRs, logLevel)
 }
 
-func serveRelay(ctx context.Context, cmd *cobra.Command, listen string, cert tls.Certificate, fingerprint string, proxyCIDRs []string) error {
-	probe := &logRelayProbe{out: os.Stderr}
+func serveRelay(ctx context.Context, cmd *cobra.Command, listen string, cert tls.Certificate, fingerprint string, proxyCIDRs []string, logLevel string) error {
+	probe := &logRelayProbe{out: os.Stderr, debug: logLevel == "debug"}
+
+	if len(proxyCIDRs) > 0 {
+		fmt.Fprintf(os.Stderr, "trusted proxies: %v\n", proxyCIDRs)
+	}
 
 	rl := relay.NewRateLimiter(relay.DefaultRateLimitConfig(), probe, time.Now)
 

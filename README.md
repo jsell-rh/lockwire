@@ -123,7 +123,17 @@ lw relay --tls-cert cert.pem --tls-key key.pem --trusted-proxy 127.0.0.0/8
 ```
 
 > [!WARNING]
-> If `--trusted-proxy` doesn't match the actual source IP of your proxy, forwarded headers are ignored and all clients rate-limit as one IP. Check your proxy's network path if rate limiting seems wrong.
+> If `--trusted-proxy` doesn't match the actual source IP of your proxy, forwarded headers are ignored and all clients rate-limit as one IP. Use `--log-level debug` to see the resolved client IP for each connection and verify it's working.
+
+### Debugging
+
+Use `--log-level debug` to log every connection with the resolved client IP:
+
+```
+lw relay --self-signed --trusted-proxy 10.0.0.0/8 --log-level debug
+```
+
+The default level is `info`, which only logs rate limit events and errors.
 
 ## How it works
 

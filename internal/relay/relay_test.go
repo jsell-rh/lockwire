@@ -570,6 +570,8 @@ func (p *recordingRelayProbe) BanTriggered(ip string, activity string, duration 
 	}
 }
 
+func (p *recordingRelayProbe) ConnectionAccepted(string, string) {}
+
 func TestConnectionRateExceededReturns429(t *testing.T) {
 	clk := newFakeClock()
 	probe := &recordingRelayProbe{}
