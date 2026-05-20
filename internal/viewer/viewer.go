@@ -19,6 +19,7 @@ var (
 	ErrSessionEnded     = errors.New("session ended by sharer")
 	ErrConnectionLost   = errors.New("session lost (connection dropped)")
 	ErrAccessRevoked    = errors.New("access revoked")
+	ErrEpochExpired     = errors.New("epoch grace period expired")
 )
 
 type RelayConn interface {
@@ -47,6 +48,10 @@ type Viewer struct {
 	cancel             context.CancelFunc
 	sharerSize         TermSize
 	onResize           func(cols, rows uint16)
+	nowFunc             func() time.Time
+	currentEpoch        uint64
+	epochTransitionTime time.Time
+	epochInitialized    bool
 }
 
 type Option func(*Viewer)
@@ -54,6 +59,12 @@ type Option func(*Viewer)
 func WithClientType(b byte) Option {
 	return func(v *Viewer) {
 		v.clientTypeByte = b
+	}
+}
+
+func WithClock(fn func() time.Time) Option {
+	return func(v *Viewer) {
+		v.nowFunc = fn
 	}
 }
 
@@ -67,6 +78,7 @@ func New(relay RelayConn, code []byte, output io.Writer, probe Probe, opts ...Op
 		output:         output,
 		probe:          probe,
 		clientTypeByte: protocol.ClientByteCLI,
+		nowFunc:        time.Now,
 		done:           make(chan struct{}),
 	}
 	for _, opt := range opts {
@@ -289,10 +301,12 @@ func (v *Viewer) streamLoop(ctx context.Context) error {
 		switch data[0] {
 		case protocol.MsgTypeStream:
 			if err := v.decryptAndWrite(data); err != nil {
-				v.consecutiveFailures++
-				if v.consecutiveFailures >= protocol.ViewerRevocationFailureThreshold {
-					v.probe.AccessRevoked()
-					return ErrAccessRevoked
+				if !errors.Is(err, ErrEpochExpired) {
+					v.consecutiveFailures++
+					if v.consecutiveFailures >= protocol.ViewerRevocationFailureThreshold {
+						v.probe.AccessRevoked()
+						return ErrAccessRevoked
+					}
 				}
 				continue
 			}
@@ -348,6 +362,11 @@ func (v *Viewer) decryptAndWrite(frame []byte) error {
 	}
 
 	epoch := binary.BigEndian.Uint64(frame[1:9])
+
+	if err := v.validateEpoch(epoch); err != nil {
+		return err
+	}
+
 	nonce := frame[9 : 9+protocol.NonceLen]
 	ciphertext := frame[9+protocol.NonceLen:]
 
@@ -384,6 +403,11 @@ func (v *Viewer) decryptAndApplySize(frame []byte) {
 	}
 
 	epoch := binary.BigEndian.Uint64(frame[1:9])
+
+	if err := v.validateEpoch(epoch); err != nil {
+		return
+	}
+
 	nonce := frame[9 : 9+protocol.NonceLen]
 	ciphertext := frame[9+protocol.NonceLen:]
 
@@ -428,6 +452,30 @@ func (v *Viewer) heartbeatLoop(ctx context.Context) {
 			v.probe.HeartbeatSent()
 		}
 	}
+}
+
+func (v *Viewer) validateEpoch(epoch uint64) error {
+	now := v.nowFunc()
+	if !v.epochInitialized {
+		v.currentEpoch = epoch
+		v.epochTransitionTime = now
+		v.epochInitialized = true
+		return nil
+	}
+	if epoch >= v.currentEpoch {
+		if epoch > v.currentEpoch {
+			v.currentEpoch = epoch
+			v.epochTransitionTime = now
+		}
+		return nil
+	}
+	if epoch == v.currentEpoch-1 {
+		graceDuration := time.Duration(protocol.EpochGracePeriodSec) * time.Second
+		if now.Sub(v.epochTransitionTime) <= graceDuration {
+			return nil
+		}
+	}
+	return ErrEpochExpired
 }
 
 func (v *Viewer) zeroKeys() {

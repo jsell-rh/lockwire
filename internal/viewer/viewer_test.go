@@ -1429,3 +1429,404 @@ func buildStreamFrame(ciphertext, nonce []byte, epoch uint64) []byte {
 	copy(buf[9+protocol.NonceLen:], ciphertext)
 	return buf
 }
+
+// --- Controllable clock for epoch grace period tests ---
+
+type testClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newTestClock(start time.Time) *testClock {
+	return &testClock{now: start}
+}
+
+func (c *testClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *testClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+func makeNonce(counter uint64) []byte {
+	nonce := make([]byte, protocol.NonceLen)
+	binary.BigEndian.PutUint64(nonce[4:], counter)
+	return nonce
+}
+
+func encryptFrameForEpoch(t *testing.T, streamKey []byte, epoch uint64, nonce []byte, plaintext []byte) []byte {
+	t.Helper()
+	epochKey, err := crypto.DeriveEpochKey(streamKey, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+	ct, err := crypto.Seal(epochKey, nonce, plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return buildStreamFrame(ct, nonce, epoch)
+}
+
+func encryptTermSizeForEpoch(t *testing.T, streamKey []byte, epoch uint64, nonce []byte, cols, rows uint16) []byte {
+	t.Helper()
+	epochKey, err := crypto.DeriveEpochKey(streamKey, epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crypto.ZeroBytes(epochKey)
+	plaintext := make([]byte, 4)
+	binary.BigEndian.PutUint16(plaintext[0:2], cols)
+	binary.BigEndian.PutUint16(plaintext[2:4], rows)
+	ct, err := crypto.Seal(epochKey, nonce, plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return buildTermSizeFrame(ct, nonce, epoch)
+}
+
+func waitForOutputLen(t *testing.T, output *safeBuffer, minLen int) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		if output.Len() >= minLen {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("expected output length >= %d, got %d: %q", minLen, output.Len(), output.String())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func copyStreamKey(t *testing.T, v *Viewer) []byte {
+	t.Helper()
+	k := make([]byte, len(v.streamKey))
+	copy(k, v.streamKey)
+	return k
+}
+
+// --- Epoch Grace Period Tests ---
+
+func TestEpochGracePeriod_AcceptWithinGrace(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Frame at epoch 5 — initializes epoch tracking
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+
+	// Frame at epoch 6 — transitions to new epoch
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Advance 3s (within 5s grace)
+	clock.Advance(3 * time.Second)
+
+	// Frame at epoch 5 — should be accepted (within grace)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(102), []byte("c"))
+	waitForOutputLen(t, output, 3)
+
+	if got := output.String(); got != "abc" {
+		t.Errorf("output = %q, want %q", got, "abc")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestEpochGracePeriod_RejectAfterGrace(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Epoch 5 then epoch 6
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Advance 6s (beyond 5s grace)
+	clock.Advance(6 * time.Second)
+
+	// Epoch 5 frame should be rejected
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(102), []byte("X"))
+
+	// Prove viewer still works with current epoch
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(103), []byte("c"))
+	waitForOutputLen(t, output, 3)
+
+	if got := output.String(); got != "abc" {
+		t.Errorf("output = %q, want %q (expired frame should be dropped)", got, "abc")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestEpochGracePeriod_RejectOldEpoch(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Epoch 5 then jump to epoch 7 (skip 6)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 7, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Epoch 5 is more than 1 behind current (7) — should be rejected immediately
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(102), []byte("X"))
+
+	// Epoch 6 is currentEpoch-1 within grace — should be accepted
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(103), []byte("c"))
+	waitForOutputLen(t, output, 3)
+
+	if got := output.String(); got != "abc" {
+		t.Errorf("output = %q, want %q", got, "abc")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestEpochGracePeriod_OutOfOrderDuringGrace(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Initialize at epoch 5, transition to 6
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Interleave: epoch 5, epoch 6, epoch 5 — all within grace
+	clock.Advance(2 * time.Second)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(102), []byte("c"))
+	waitForOutputLen(t, output, 3)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(103), []byte("d"))
+	waitForOutputLen(t, output, 4)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(104), []byte("e"))
+	waitForOutputLen(t, output, 5)
+
+	if got := output.String(); got != "abcde" {
+		t.Errorf("output = %q, want %q", got, "abcde")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestEpochGracePeriod_DoesNotCountTowardRevocation(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Epoch 5 then epoch 6
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Advance beyond grace
+	clock.Advance(6 * time.Second)
+
+	// Send expired-epoch frames exceeding revocation threshold
+	for i := 0; i < protocol.ViewerRevocationFailureThreshold+5; i++ {
+		relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(uint64(200+i)), []byte("X"))
+	}
+
+	// Viewer should NOT have detected revocation — send a valid frame to prove it's alive
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(300), []byte("c"))
+	waitForOutputLen(t, output, 3)
+
+	if got := output.String(); got != "abc" {
+		t.Errorf("output = %q, want %q (expired epochs must not trigger revocation)", got, "abc")
+	}
+
+	probe.mu.Lock()
+	revoked := probe.accessRevoked
+	probe.mu.Unlock()
+	if revoked {
+		t.Error("AccessRevoked should not be triggered by expired epoch frames")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestEpochGracePeriod_TermSizeRespected(t *testing.T) {
+	clock := newTestClock(time.Now())
+	relay := newFakeRelay()
+	output := &safeBuffer{}
+	probe := &recordingProbe{}
+
+	sess, err := session.NewSession(testCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	v := New(relay, testCode, output, probe, WithClock(clock.Now))
+
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		errCh <- v.Run(ctx)
+	}()
+
+	simulateSharerHandshake(t, relay, sess, testCode)
+	waitForProbe(t, probe)
+
+	streamKey := copyStreamKey(t, v)
+
+	// Initialize at epoch 5, transition to 6
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 5, makeNonce(100), []byte("a"))
+	waitForOutput(t, output)
+	relay.incoming <- encryptFrameForEpoch(t, streamKey, 6, makeNonce(101), []byte("b"))
+	waitForOutputLen(t, output, 2)
+
+	// Advance beyond grace
+	clock.Advance(6 * time.Second)
+
+	// Term size from expired epoch 5 — should be silently dropped
+	relay.incoming <- encryptTermSizeForEpoch(t, streamKey, 5, makeNonce(102), 999, 999)
+	time.Sleep(50 * time.Millisecond)
+
+	// Term size from current epoch 6 — should work
+	relay.incoming <- encryptTermSizeForEpoch(t, streamKey, 6, makeNonce(103), 120, 40)
+	waitForResize(t, probe)
+
+	probe.mu.Lock()
+	if len(probe.resizes) != 1 {
+		t.Fatalf("expected 1 resize event, got %d", len(probe.resizes))
+	}
+	if probe.resizes[0].cols != 120 || probe.resizes[0].rows != 40 {
+		t.Errorf("resize = %dx%d, want 120x40", probe.resizes[0].cols, probe.resizes[0].rows)
+	}
+	probe.mu.Unlock()
+
+	cancel()
+	<-errCh
+}
