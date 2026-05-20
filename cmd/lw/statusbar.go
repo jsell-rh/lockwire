@@ -64,7 +64,8 @@ func (sb *statusBar) drawLocked() {
 		text = sb.content()
 	}
 	padded := padOrTruncate(text, int(sb.cols))
-	fmt.Fprintf(sb.out, "\0337\033[%d;1H%s%s%s\0338", sb.totalRows, sb.colorSeq, padded, colorReset)
+	fmt.Fprintf(sb.out, "\0337\033[1;%dr\033[%d;1H%s%s%s\0338",
+		sb.totalRows-1, sb.totalRows, sb.colorSeq, padded, colorReset)
 }
 
 func (sb *statusBar) ShowEvent(msg string) {
