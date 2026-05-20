@@ -86,6 +86,8 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	}
 	defer restoreTerminal(stdinFd, oldTermios)
 
+	fmt.Fprint(os.Stdout, "\033[2J\033[H")
+
 	probe := newSharerProbe(os.Stdout, outerCols, outerRows, pairingCode)
 	bar := probe.bar
 	bar.SetScrollRegion()

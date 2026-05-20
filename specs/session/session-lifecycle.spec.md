@@ -16,7 +16,7 @@ The system SHALL create a new Session when the Sharer runs `lw share`, connectin
 - THEN two lines are printed to stdout:
   ```
   code: thunder-eagle-river-moon-stone-fire
-  link: https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire
+  link: https://lockwire.online/join#thunder-eagle-river-moon-stone-fire
   ```
 - AND the Sharer's terminal output (pty) is captured and streamed from that point forward
 
@@ -24,7 +24,7 @@ The system SHALL create a new Session when the Sharer runs `lw share`, connectin
 - GIVEN a user runs `lw share`
 - WHEN the relay cannot be reached within 5 seconds
 - THEN the process exits with status 1
-- AND an actionable error is printed to stderr (e.g. `error: could not reach relay at wss://relay.lockwire.io — check your connection`)
+- AND an actionable error is printed to stderr (e.g. `error: could not reach relay at wss://lockwire.online — check your connection`)
 - AND nothing is printed to stdout
 
 #### Scenario: Session ID does not reveal the Code
@@ -106,7 +106,7 @@ When the Sharer's terminal dimensions are received, the Viewer SHOULD attempt to
 The system SHALL allow a Viewer to join an active Session via a browser by navigating to `https://<relay-host>/join#<code>`, entering the Code if not pre-filled, and viewing the Sharer's terminal rendered in xterm.js. The cryptographic operations (SPAKE2, AES-256-GCM) SHALL execute in the browser using the WebCrypto API.
 
 #### Scenario: Browser join via URL
-- GIVEN a user opens `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
+- GIVEN a user opens `https://lockwire.online/join#thunder-eagle-river-moon-stone-fire`
 - WHEN the page loads
 - THEN the Code is pre-populated in the input field
 - AND the user clicks "Watch"
@@ -114,7 +114,7 @@ The system SHALL allow a Viewer to join an active Session via a browser by navig
 - AND on success, the terminal renders in an xterm.js instance
 
 #### Scenario: Browser join via manual code entry
-- GIVEN a user opens `https://relay.lockwire.io`
+- GIVEN a user opens `https://lockwire.online`
 - WHEN the user types the Code into the input field and clicks "Watch"
 - THEN the behavior is identical to the URL-based flow
 

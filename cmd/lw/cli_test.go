@@ -68,7 +68,7 @@ func TestShareRelayURLValidAccepted(t *testing.T) {
 		name string
 		url  string
 	}{
-		{name: "standard wss", url: "wss://relay.lockwire.io"},
+		{name: "standard wss", url: "wss://lockwire.online"},
 		{name: "wss with path", url: "wss://host.example.com/lockwire"},
 		{name: "wss with port", url: "wss://localhost:8443"},
 	}
@@ -96,9 +96,9 @@ func TestBuildWatchURL(t *testing.T) {
 		want  string
 	}{
 		{
-			relay: "wss://relay.lockwire.io",
+			relay: "wss://lockwire.online",
 			code:  "thunder-eagle-river-moon-stone-fire",
-			want:  "https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire",
+			want:  "https://lockwire.online/join#thunder-eagle-river-moon-stone-fire",
 		},
 		{
 			relay: "wss://relay.example.com/lockwire",

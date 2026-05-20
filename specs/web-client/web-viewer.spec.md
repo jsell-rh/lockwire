@@ -11,7 +11,7 @@ The Lockwire web viewer allows a Viewer to watch a shared session in any modern 
 The web viewer SHALL function in any modern browser (Chrome ≥ 111, Firefox ≥ 113, Safari ≥ 16.4) without plugins or extensions. Stream encryption (AES-256-GCM) and key derivation (HKDF-SHA256) SHALL use the browser's native WebCrypto API. Session ID derivation (Argon2id) SHALL use an embedded WASM module bundled with the web viewer, as Argon2id is not available in WebCrypto. The WASM module SHALL be served from the relay alongside the viewer application (no external download).
 
 #### Scenario: First-time browser viewer
-- GIVEN a user receives the link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
+- GIVEN a user receives the link `https://lockwire.online/join#thunder-eagle-river-moon-stone-fire`
 - WHEN they open it in a supported browser
 - THEN the page loads fully (HTML + JS) in under 2 seconds on a typical connection
 - AND no plugin prompt, install prompt, or download appears
@@ -25,20 +25,20 @@ The Code SHALL be carried in the URL fragment (the `#` portion), never in the pa
 The web viewer SHALL extract the Code from `window.location.hash` client-side and pre-populate the code input field. The user SHALL be able to edit the pre-filled code before initiating the session.
 
 #### Scenario: Code in URL fragment
-- GIVEN a user receives the link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
+- GIVEN a user receives the link `https://lockwire.online/join#thunder-eagle-river-moon-stone-fire`
 - WHEN the browser loads the page
 - THEN the HTTP request sent to the relay is `GET /join` — the fragment is not transmitted
 - AND the web viewer reads `window.location.hash` and populates the code input field with `thunder-eagle-river-moon-stone-fire`
 - AND a "Watch" button is available
 
 #### Scenario: Relay logs contain no Code
-- GIVEN a session link `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire` is used
+- GIVEN a session link `https://lockwire.online/join#thunder-eagle-river-moon-stone-fire` is used
 - WHEN the relay's access logs are inspected
 - THEN the log entry shows `GET /join` with no Code present
 - AND Cloudflare or any reverse proxy in front of the relay similarly records no Code
 
 #### Scenario: No code in URL
-- GIVEN a user opens `https://relay.lockwire.io` or `https://relay.lockwire.io/join`
+- GIVEN a user opens `https://lockwire.online` or `https://lockwire.online/join`
 - WHEN the page loads
 - THEN the code input field is empty
 - AND the user must type the Code before clicking "Watch"

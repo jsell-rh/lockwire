@@ -15,7 +15,7 @@ The system SHALL work with no configuration file, environment variable, or flag 
 #### Scenario: First-time user shares
 - GIVEN a user has installed `lw` and never configured it
 - WHEN they run `lw share`
-- THEN a session begins using the default public relay (`wss://relay.lockwire.io`)
+- THEN a session begins using the default public relay (`wss://lockwire.online`)
 - AND a Code and watch link are printed to stdout
 
 ---
@@ -30,7 +30,7 @@ The system SHALL start a terminal sharing session, print the Code and watch URL,
 - THEN exactly two lines are printed to stdout:
   ```
   code: thunder-eagle-river-moon-stone-fire
-  link: https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire
+  link: https://lockwire.online/join#thunder-eagle-river-moon-stone-fire
   ```
 - AND the Sharer's shell is launched in a PTY occupying the full terminal except the bottom row
 - AND a status bar is rendered on the bottom row (see Session Lifecycle § Sharer Status Bar)

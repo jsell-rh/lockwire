@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultRelayURL = "wss://relay.lockwire.io"
+const defaultRelayURL = "wss://lockwire.online"
 
 func newRootCmd(ver string) *cobra.Command {
 	root := &cobra.Command{

@@ -188,7 +188,7 @@ The relay SHALL be architecturally incapable of reading session content. This is
 The relay SHALL serve the Lockwire web viewer application over HTTPS at the same host. The web viewer SHALL be accessible at `https://<relay-host>/join#<code>`.
 
 #### Scenario: Browser viewer via URL
-- GIVEN a user opens `https://relay.lockwire.io/join#thunder-eagle-river-moon-stone-fire`
+- GIVEN a user opens `https://lockwire.online/join#thunder-eagle-river-moon-stone-fire`
 - WHEN the page loads
 - THEN the browser downloads the web viewer application
 - AND the Code is pre-filled from the URL path
