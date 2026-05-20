@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/jsell-rh/lockwire/compare/v1.1.0...v1.2.0) (2026-05-20)
+
+
+### Features
+
+* **relay:** add --log-level flag with debug connection logging ([5813ebc](https://github.com/jsell-rh/lockwire/commit/5813ebcc79bf57edcce9c424d3d033593d131112))
+* **relay:** add --trusted-proxy for real client IP behind proxies ([b24f048](https://github.com/jsell-rh/lockwire/commit/b24f048274bf4950cec35d2192d2b345859afea9))
+
 ## [1.1.0](https://github.com/jsell-rh/lockwire/compare/v1.0.3...v1.1.0) (2026-05-20)
 
 
