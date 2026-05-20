@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/jsell-rh/lockwire/compare/v1.0.2...v1.0.3) (2026-05-20)
+
+
+### Bug Fixes
+
+* **relay:** drop frames instead of disconnecting slow viewers ([e8d15f4](https://github.com/jsell-rh/lockwire/commit/e8d15f48b406ef95c678e23ea8c8b7f52c14b87d))
+
 ## [1.0.2](https://github.com/jsell-rh/lockwire/compare/v1.0.1...v1.0.2) (2026-05-20)
 
 
