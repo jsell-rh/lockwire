@@ -92,6 +92,7 @@ func runShare(cmd *cobra.Command, relayURL string, insecure bool) error {
 	bar := probe.bar
 	bar.SetScrollRegion()
 	bar.Draw()
+	fmt.Fprintf(os.Stdout, "\033[%d;1H", bannerLines)
 	defer func() {
 		bar.Close()
 		resetScrollRegion(os.Stdout)

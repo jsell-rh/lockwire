@@ -9,6 +9,8 @@ const fgCyberCyan = "\033[38;2;0;240;255m"
 const fgAmber = "\033[38;2;255;176;0m"
 const dim = "\033[2m"
 
+const bannerLines = 8
+
 func printWelcomeBanner(w io.Writer, code, link string) {
 	fmt.Fprintf(w, "\r\n")
 	fmt.Fprintf(w, "  %s┏╸%s%slockwire%s\r\n", dim, colorReset, fgCyberCyan, colorReset)
