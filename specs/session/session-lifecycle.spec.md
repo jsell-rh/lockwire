@@ -179,8 +179,11 @@ The system SHALL allow the Sharer to revoke an individual Viewer's access withou
 - GIVEN Viewer A has been revoked
 - WHEN Viewer A runs `lw join <same-code>` again and completes SPAKE2
 - THEN Viewer A receives a new Viewer ID
-- AND the Sharer sees `viewer joined: <new-id> (previously revoked)` on their terminal
+- AND the Sharer sees the standard `viewer joined: <new-id> (cli)` notification
+- AND the system does not distinguish the rejoin from a new Viewer joining; the Code remains valid for all parties who know it
 - AND the Sharer must explicitly run `lw revoke <new-id>` again to block them; re-joining is not auto-blocked
+
+> **Design note:** The relay is a blind pipe and cannot correlate connections to previously-revoked Viewers. SPAKE2 produces unique session keys per handshake, so derived auth keys provide no linkage. To permanently block a Viewer, the Sharer must terminate the session and create a new one with a fresh Code.
 
 #### Scenario: Viewer join notification
 - GIVEN a session is active
